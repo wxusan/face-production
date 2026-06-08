@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>strict-product-governance-overengineering-building-too</title>
+    <script type="module" crossorigin src="/assets/index-DyXZTYD2.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CStYeW_j.css">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      (() => {
+        const allowedNav = new Set(['Кандидаты', 'Nomzodlar']);
+        const hiddenNav = new Set(['Обзор', 'Кампании', 'Управление', 'Поставщики', 'Ko‘rinish', 'Kampaniyalar', 'Boshqaruv', 'Ta’minotchilar']);
+
+        function adminToken() {
+          return localStorage.getItem('face-admin-token') || '';
+        }
+
+        function findCandidateId() {
+          const detailPanel = document.querySelector('.detailPanel');
+          if (!detailPanel) return '';
+          const eyebrow = detailPanel.querySelector('.eyebrow');
+          const value = (eyebrow && eyebrow.textContent || '').trim();
+          return /^TG-\d+|^FC-\d+/.test(value) ? value : '';
+        }
+
+        function addProfileButton() {
+          const detailPanel = document.querySelector('.detailPanel');
+          if (!detailPanel || detailPanel.querySelector('[data-profile-open]')) return;
+          const id = findCandidateId();
+          if (!id) return;
+          const row = detailPanel.querySelector('.buttonRow') || detailPanel;
+          const button = document.createElement('button');
+          button.className = 'secondaryButton';
+          button.type = 'button';
+          button.dataset.profileOpen = 'true';
+          button.textContent = 'Открыть профиль';
+          button.onclick = () => {
+            const token = adminToken();
+            window.open(`/candidate-profile/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`, '_blank', 'noopener');
+          };
+          row.prepend(button);
+        }
+
+        function trimNavigation() {
+          document.querySelectorAll('.navButton').forEach((button) => {
+            const label = (button.textContent || '').trim();
+            if (hiddenNav.has(label)) button.style.display = 'none';
+            if (allowedNav.has(label) && !button.classList.contains('active')) button.click();
+          });
+        }
+
+        function apply() {
+          trimNavigation();
+          addProfileButton();
+        }
+
+        setInterval(apply, 700);
+        window.addEventListener('load', apply);
+      })();
+    </script>
+  </body>
+</html>

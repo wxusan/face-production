@@ -1,0 +1,30 @@
+{
+  "buildCommand": "echo 'Admin portal is served by the Node API; no Vite build required.'",
+  "functions": {
+    "api/**/*.js": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/api"
+    },
+    {
+      "source": "/assets/:path*",
+      "destination": "/api/assets/:path*"
+    },
+    {
+      "source": "/favicon.svg",
+      "destination": "/api/favicon.svg"
+    },
+    {
+      "source": "/icons.svg",
+      "destination": "/api/icons.svg"
+    },
+    {
+      "source": "/candidate-profile/:path*",
+      "destination": "/api/candidate-profile/:path*"
+    }
+  ]
+}
