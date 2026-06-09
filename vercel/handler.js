@@ -3,20 +3,29 @@ import { routeRequest } from '../server/index.js'
 function normalizeUrl(request) {
   const originalUrl = request.url ?? '/'
   const [pathname, query = ''] = originalUrl.split('?')
+  const params = new URLSearchParams(query)
+  const rewrittenPath = params.get('__path')
   let nextPathname = pathname
+  let nextQuery = query
 
-  if (pathname === '/api' || pathname === '/api/') {
-    nextPathname = '/'
-  } else if (
-    pathname.startsWith('/api/assets/')
-    || pathname === '/api/favicon.svg'
-    || pathname === '/api/icons.svg'
-    || pathname.startsWith('/api/candidate-profile/')
-  ) {
-    nextPathname = pathname.replace(/^\/api/, '')
+  if (rewrittenPath) {
+    nextPathname = rewrittenPath
+    params.delete('__path')
+    nextQuery = params.toString()
   }
 
-  request.url = query ? `${nextPathname}?${query}` : nextPathname
+  if (!rewrittenPath && (pathname === '/api' || pathname === '/api/')) {
+    nextPathname = '/'
+  } else if (
+    nextPathname.startsWith('/api/assets/')
+    || nextPathname === '/api/favicon.svg'
+    || nextPathname === '/api/icons.svg'
+    || nextPathname.startsWith('/api/candidate-profile/')
+  ) {
+    nextPathname = nextPathname.replace(/^\/api/, '')
+  }
+
+  request.url = nextQuery ? `${nextPathname}?${nextQuery}` : nextPathname
 }
 
 export default async function handler(request, response) {

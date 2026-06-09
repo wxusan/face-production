@@ -1108,9 +1108,13 @@ async function sendPhotoStepPrompt(session, step) {
   const examplePath = exampleMediaPath(session, step)
 
   if (examplePath) {
-    const example = await sendLocalPhoto(session.chatId, examplePath, `📌 ${t.examplePhoto}`)
-    session.promptMessageIds ??= []
-    session.promptMessageIds.push(example.message_id)
+    try {
+      const example = await sendLocalPhoto(session.chatId, examplePath, `📌 ${t.examplePhoto}`)
+      session.promptMessageIds ??= []
+      session.promptMessageIds.push(example.message_id)
+    } catch (error) {
+      console.log(`Photo example send failed: ${error.message}`)
+    }
   }
 
   const current = stepCurrentValue(session.data, step, lang)
