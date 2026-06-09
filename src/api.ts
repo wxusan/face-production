@@ -1,4 +1,4 @@
-const API_BASE = 'http://127.0.0.1:8787'
+const API_BASE = ''
 
 export function getCandidateExportUrl(token: string) {
   return `${API_BASE}/api/candidates/export.csv?token=${encodeURIComponent(token)}`

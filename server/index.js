@@ -77,15 +77,38 @@ function sendCsv(response, filename, content) {
   response.end(content)
 }
 
-function sendImage(response, content) {
-  sendMedia(response, content, 'image/jpeg')
+function sendImage(response, content, request) {
+  sendMedia(response, content, 'image/jpeg', request)
 }
 
-function sendMedia(response, content, contentType) {
+function sendMedia(response, content, contentType, request) {
+  const total = content.length
+  const rangeHeader = request?.headers?.range
+
+  if (rangeHeader) {
+    const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/)
+    if (match) {
+      const start = match[1] ? parseInt(match[1], 10) : 0
+      const end = match[2] ? parseInt(match[2], 10) : total - 1
+      const safeStart = Math.max(0, Math.min(start, total - 1))
+      const safeEnd = Math.max(safeStart, Math.min(end, total - 1))
+      const chunk = content.slice(safeStart, safeEnd + 1)
+      response.writeHead(206, {
+        'accept-ranges': 'bytes',
+        'cache-control': 'private, max-age=3600',
+        'content-length': chunk.length,
+        'content-range': `bytes ${safeStart}-${safeEnd}/${total}`,
+        'content-type': contentType,
+      })
+      response.end(chunk)
+      return
+    }
+  }
+
   response.writeHead(200, {
-    'access-control-allow-headers': 'content-type,x-admin-token',
-    'access-control-allow-methods': 'GET,POST,OPTIONS',
-    'access-control-allow-origin': 'http://127.0.0.1:5173',
+    'accept-ranges': 'bytes',
+    'cache-control': 'private, max-age=3600',
+    'content-length': total,
     'content-type': contentType,
   })
   response.end(content)
@@ -264,6 +287,14 @@ function candidateProfileHtml(candidate, token) {
     .fact span { color: #63748d; font-size: 12px; font-weight: 850; text-transform: uppercase; }
     .fact strong { color: #152033; overflow-wrap: anywhere; }
     .back { color: #1b6ca8; font-weight: 850; text-decoration: none; }
+    .msgBox { display: grid; gap: 10px; padding: 16px; border: 1px solid #d7e0ec; border-radius: 8px; background: #fff; }
+    .msgBox h3 { margin: 0; font-size: 16px; }
+    .msgBox textarea { width: 100%; min-height: 80px; border: 1px solid #d7e0ec; border-radius: 8px; padding: 10px; font: inherit; color: #152033; background: #fff; resize: vertical; box-sizing: border-box; }
+    .msgBox button { min-height: 38px; border: 0; border-radius: 8px; padding: 0 16px; background: #1b6ca8; color: #fff; font-weight: 850; cursor: pointer; }
+    .msgBox button:disabled { opacity: .55; cursor: not-allowed; }
+    .msgBox .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .msgBox .result { color: #166534; font-weight: 800; }
+    .msgBox .err { color: #9f1239; font-weight: 800; }
     @media (max-width: 840px) { main { padding: 18px; } .media, .facts { grid-template-columns: 1fr 1fr; } .videoTile { grid-column: 1 / -1; } }
     @media (max-width: 560px) { .media, .facts { grid-template-columns: 1fr; } .top { display: grid; } }
   </style>
@@ -296,6 +327,46 @@ function candidateProfileHtml(candidate, token) {
       ${profileField('Навыки', candidate.skills)}
       ${profileField('Источник', candidate.source)}
     </section>
+    <section class="msgBox">
+      <h3>Написать в Telegram</h3>
+      <textarea id="msgText" placeholder="Сообщение кандидату..."></textarea>
+      <div class="row">
+        <button id="msgSend">Отправить</button>
+        <span id="msgResult"></span>
+      </div>
+    </section>
+    <script>
+      (function() {
+        var adminToken = ${JSON.stringify(token)};
+        var candidateId = ${JSON.stringify(candidate.id)};
+        document.getElementById('msgSend').onclick = async function() {
+          var btn = document.getElementById('msgSend');
+          var result = document.getElementById('msgResult');
+          var text = document.getElementById('msgText').value.trim();
+          if (!text) { result.className = 'err'; result.textContent = 'Введите текст'; return; }
+          btn.disabled = true;
+          result.className = '';
+          result.textContent = '...';
+          try {
+            var resp = await fetch('/api/candidates/' + encodeURIComponent(candidateId) + '/message', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', 'x-admin-token': adminToken },
+              body: JSON.stringify({ text: text })
+            });
+            var data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Ошибка');
+            document.getElementById('msgText').value = '';
+            result.className = 'result';
+            result.textContent = 'Отправлено ✓';
+          } catch(e) {
+            result.className = 'err';
+            result.textContent = e.message;
+          } finally {
+            btn.disabled = false;
+          }
+        };
+      })();
+    </script>
   </main>
 </body>
 </html>`
@@ -416,6 +487,12 @@ function candidateAdminHtml() {
     .composerDates input { width: 100%; min-height: 40px; border: 1px solid #d7e0ec; border-radius: 8px; padding: 0 10px; background: #fff; color: #152033; }
     .selectCell { width: 42px; }
     .empty { min-height: 220px; display: grid; place-items: center; padding: 24px; color: #63748d; text-align: center; }
+    .langRow { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 0; }
+    .langBtn { min-height: 30px; border: 1px solid #374151; border-radius: 6px; background: transparent; color: #9ca3af; font-size: 11px; font-weight: 900; cursor: pointer; padding: 0 8px; }
+    .langBtn.active { border-color: #24a19c; background: #24a19c; color: #fff; }
+    .loginCard .langRow { justify-content: center; margin-top: 4px; }
+    .loginCard .langBtn { border-color: #d7e0ec; color: #63748d; background: #f4f7fb; }
+    .loginCard .langBtn.active { border-color: #1b6ca8; background: #1b6ca8; color: #fff; }
     @media (max-width: 1180px) { .filterGrid, .postGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .rangeGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     @media (max-width: 900px) { .postGrid { grid-template-columns: 1fr; } .sectionHeader { display: grid; } .statRow { justify-content: flex-start; } }
     @media (max-width: 760px) { .app { grid-template-columns: 1fr; } .sidebar { padding: 16px; } .filterGrid, .rangeGrid, .facts, .media, .composerDates { grid-template-columns: 1fr; } .workspace { padding: 18px; } .topbar { display: grid; } .recipientItem { grid-template-columns: 24px minmax(0, 1fr); } .recipientItem .telegramBadge { grid-column: 2; justify-self: start; } }
@@ -456,14 +533,128 @@ function candidateAdminHtml() {
         performance: [], sports: [], physical: [], languages: [], appearance: [],
         media: {}
       };
-      var mediaFields = [
-        ['fullBodyPhotoPath', 'fullBodyPhoto', 'Полный рост'],
-        ['closeShotPhotoPath', 'closeShotPhoto', 'Фото ближе'],
-        ['leftProfilePhotoPath', 'leftProfilePhoto', 'Левый профиль'],
-        ['rightProfilePhotoPath', 'rightProfilePhoto', 'Правый профиль'],
-        ['portraitPhotoPath', 'portraitPhoto', 'Портрет'],
-        ['introVideoPath', 'introVideo', 'Видео']
-      ];
+      var lang = localStorage.getItem('face-admin-lang') || 'ru';
+      var translations = {
+        ru: {
+          adminCode: 'Код администратора', age: 'Возраст', ageFrom: 'Возраст от', ageTo: 'Возраст до',
+          all: 'Все', allMedia: 'Все медиа', appearance: 'Внешность', approve: 'Одобрить', approved: 'Активно',
+          brand: 'Платформа талантов', candidate: 'Кандидат', candidatesPage: 'Кандидаты',
+          castingBodyPlaceholder: 'Описание проекта, кого ищем, условия, адрес, контакт.',
+          castingEnd: 'Конец', castingPostLabel: 'Кастинг-пост', castingStart: 'Старт',
+          castingTitlePlaceholder: 'Название кастинга', city: 'Город', clearFilters: 'Сбросить фильтры',
+          closeShotPhoto: 'Фото ближе', createSend: 'Создать и отправить', createdAt: 'Создан',
+          createdFrom: 'Создан от', createdTo: 'Создан до', deselect: 'Снять выбор',
+          export: 'Экспорт всей базы', filledBy: 'Заполнил', filter_additional: 'Дополнительные фильтры',
+          filter_main: 'Основные фильтры', filter_media: 'Медиа', filter_talents: 'Таланты и внешность',
+          forFriend: 'За друга', found: 'Найдено', foundShort: 'Найдено:', fullBodyPhoto: 'Полный рост',
+          gender: 'Пол', hasTelegram: 'Telegram', height: 'Рост', heightFrom: 'Рост от', heightTo: 'Рост до',
+          hide: 'Скрыть', introVideo: 'Видео', languages: 'Языки', leftProfile: 'Левый профиль',
+          listByFilters: 'Список формируется фильтрами выше', login: 'Войти', logout: 'Выйти',
+          media: 'Медиа', messagePlaceholder: 'Написать кандидату или отправителю анкеты',
+          messageRecipients: 'Получатели', messageSelected: 'Сообщение выбранным',
+          messageTelegram: 'Сообщение в Telegram', messageText: 'Текст сообщения', newCasting: 'Новый кастинг',
+          noMedia: 'Медиа не загружено', noRecipients: 'Нет кандидатов по текущему фильтру',
+          noResults: 'Нет кандидатов по текущим фильтрам', noTelegram: 'Нет Telegram',
+          openProfile: 'Открыть профиль', pendingPage: 'Заявки', pendingStatus: 'На проверке',
+          performance: 'Сценические таланты', personal: 'Личная', phone: 'Телефон',
+          physical: 'Физические навыки', portrait: 'Портрет',
+          postsOnly: 'Посты отправляются только одобренным кандидатам.', postsPage: 'Посты',
+          ratingLabel: 'Рейтинг заявки', rating: 'Рейтинг', refresh: 'Обновить',
+          regularPost: 'Обычный пост', reject: 'Отклонить', rejected: 'Отклонен',
+          resultNote_others: 'Результаты сортируются по рейтингу', resultNote_posts: 'Выбор получателей ниже',
+          rightProfile: 'Правый профиль', saveRating: 'Сохранить рейтинг',
+          search: 'Поиск: имя, телефон, Telegram, ID', selectFiltered: 'Выбрать найденных',
+          selected: 'Выбрано', selectedShort: 'Выбрано:', send: 'Отправить', sendPost: 'Отправить пост',
+          show: 'Показать', source: 'Источник', sports: 'Спорт', status: 'Статус',
+          telegramCandidate: 'Telegram кандидата', title: 'Консоль MVP', type: 'Тип анкеты',
+          updatedAt: 'Обновлен', updatedFrom: 'Обновлен от', updatedTo: 'Обновлен до',
+          weight: 'Вес', weightFrom: 'Вес от', weightTo: 'Вес до',
+        },
+        uz: {
+          adminCode: 'Admin kodi', age: 'Yosh', ageFrom: 'Yosh dan', ageTo: 'Yosh gacha',
+          all: 'Barchasi', allMedia: 'Barcha media', appearance: "Ko'rinish", approve: 'Tasdiqlash',
+          approved: 'Faol', brand: 'Talent platformasi', candidate: 'Nomzod', candidatesPage: 'Nomzodlar',
+          castingBodyPlaceholder: "Loyiha tavsifi, kimni qidiramiz, shartlar, manzil, aloqa.",
+          castingEnd: 'Tugash', castingPostLabel: 'Kasting post', castingStart: 'Boshlanish',
+          castingTitlePlaceholder: 'Kasting nomi', city: 'Shahar', clearFilters: 'Filtrlarni tozalash',
+          closeShotPhoto: 'Yaqinroq foto', createSend: 'Yaratish va yuborish', createdAt: 'Yaratilgan',
+          createdFrom: 'Yaratilgan dan', createdTo: 'Yaratilgan gacha', deselect: "Tanlovni bekor qilish",
+          export: "Ma'lumotlar bazasini eksport", filledBy: "To'ldirgan",
+          filter_additional: "Qo'shimcha filtrlar", filter_main: 'Asosiy filtrlar',
+          filter_media: 'Media', filter_talents: "Talantlar va ko'rinish", forFriend: "Do'st uchun",
+          found: 'Topildi', foundShort: 'Topildi:', fullBodyPhoto: "To'liq bo'y",
+          gender: 'Jins', hasTelegram: 'Telegram', height: "Bo'y", heightFrom: "Bo'y dan",
+          heightTo: "Bo'y gacha", hide: 'Yashirish', introVideo: 'Video', languages: 'Tillar',
+          leftProfile: 'Chap profil', listByFilters: "Ro'yxat yuqoridagi filtrlar bilan shakllantiriladi",
+          login: 'Kirish', logout: 'Chiqish', media: 'Media',
+          messagePlaceholder: "Nomzodga yoki ariza yuboruvchiga yozing",
+          messageRecipients: "Qabul qiluvchilar", messageSelected: "Tanlanganlarga xabar",
+          messageTelegram: 'Telegram xabar', messageText: 'Xabar matni', newCasting: 'Yangi kasting',
+          noMedia: 'Media yuklanmagan', noRecipients: "Joriy filtrga mos nomzodlar yo'q",
+          noResults: "Joriy filtrlarga mos nomzodlar yo'q", noTelegram: "Telegram yo'q",
+          openProfile: "Profilni ochish", pendingPage: 'Arizalar', pendingStatus: "Tekshiruvda",
+          performance: 'Sahna talantlari', personal: 'Shaxsiy', phone: 'Telefon',
+          physical: "Jismoniy ko'nikmalar", portrait: 'Portret',
+          postsOnly: "Postlar faqat tasdiqlangan nomzodlarga yuboriladi.", postsPage: 'Postlar',
+          ratingLabel: 'Ariza reytingi', rating: 'Reyting', refresh: 'Yangilash',
+          regularPost: 'Oddiy post', reject: 'Rad etish', rejected: 'Rad etildi',
+          resultNote_others: "Natijalar reyting bo'yicha saralanadi",
+          resultNote_posts: "Qabul qiluvchilar pastda tanlang", rightProfile: "O'ng profil",
+          saveRating: 'Reytingni saqlash', search: "Qidirish: ism, telefon, Telegram, ID",
+          selectFiltered: "Topilganlarni tanlash", selected: 'Tanlangan', selectedShort: 'Tanlangan:',
+          send: 'Yuborish', sendPost: 'Post yuborish', show: "Ko'rsatish", source: 'Manba',
+          sports: 'Sport', status: 'Holat', telegramCandidate: 'Nomzod Telegram', title: 'MVP konsoli',
+          type: 'Ariza turi', updatedAt: 'Yangilangan', updatedFrom: "Yangilangan dan",
+          updatedTo: "Yangilangan gacha", weight: 'Vazn', weightFrom: 'Vazn dan', weightTo: 'Vazn gacha',
+        },
+        en: {
+          adminCode: 'Admin code', age: 'Age', ageFrom: 'Age from', ageTo: 'Age to',
+          all: 'All', allMedia: 'All media', appearance: 'Appearance', approve: 'Approve',
+          approved: 'Active', brand: 'Talent Platform', candidate: 'Candidate', candidatesPage: 'Candidates',
+          castingBodyPlaceholder: 'Project description, who we seek, conditions, location, contact.',
+          castingEnd: 'End', castingPostLabel: 'Casting post', castingStart: 'Start',
+          castingTitlePlaceholder: 'Casting title', city: 'City', clearFilters: 'Reset filters',
+          closeShotPhoto: 'Close shot', createSend: 'Create & send', createdAt: 'Created',
+          createdFrom: 'Created from', createdTo: 'Created to', deselect: 'Deselect all',
+          export: 'Export database', filledBy: 'Filled by', filter_additional: 'Additional filters',
+          filter_main: 'Main filters', filter_media: 'Media', filter_talents: 'Talents & appearance',
+          forFriend: 'For a friend', found: 'Found', foundShort: 'Found:', fullBodyPhoto: 'Full body',
+          gender: 'Gender', hasTelegram: 'Telegram', height: 'Height', heightFrom: 'Height from',
+          heightTo: 'Height to', hide: 'Hide', introVideo: 'Video', languages: 'Languages',
+          leftProfile: 'Left profile', listByFilters: 'List is formed by the filters above',
+          login: 'Login', logout: 'Logout', media: 'Media',
+          messagePlaceholder: 'Write to candidate or application submitter',
+          messageRecipients: 'Recipients', messageSelected: 'Message to selected',
+          messageTelegram: 'Telegram message', messageText: 'Message text', newCasting: 'New casting',
+          noMedia: 'No media uploaded', noRecipients: 'No candidates match the current filter',
+          noResults: 'No candidates match current filters', noTelegram: 'No Telegram',
+          openProfile: 'Open profile', pendingPage: 'Applications', pendingStatus: 'Pending',
+          performance: 'Performance talents', personal: 'Personal', phone: 'Phone',
+          physical: 'Physical skills', portrait: 'Portrait',
+          postsOnly: 'Posts are sent to approved candidates only.', postsPage: 'Posts',
+          ratingLabel: 'Application rating', rating: 'Rating', refresh: 'Refresh',
+          regularPost: 'Regular post', reject: 'Reject', rejected: 'Rejected',
+          resultNote_others: 'Results sorted by rating', resultNote_posts: 'Select recipients below',
+          rightProfile: 'Right profile', saveRating: 'Save rating',
+          search: 'Search: name, phone, Telegram, ID', selectFiltered: 'Select filtered',
+          selected: 'Selected', selectedShort: 'Selected:', send: 'Send', sendPost: 'Send post',
+          show: 'Show', source: 'Source', sports: 'Sports', status: 'Status',
+          telegramCandidate: 'Candidate Telegram', title: 'MVP Console', type: 'Application type',
+          updatedAt: 'Updated', updatedFrom: 'Updated from', updatedTo: 'Updated to',
+          weight: 'Weight', weightFrom: 'Weight from', weightTo: 'Weight to',
+        }
+      };
+      function t(key) { return (translations[lang] || translations.ru)[key] || key; }
+      function getMediaFields() {
+        return [
+          ['fullBodyPhotoPath', 'fullBodyPhoto', t('fullBodyPhoto')],
+          ['closeShotPhotoPath', 'closeShotPhoto', t('closeShotPhoto')],
+          ['leftProfilePhotoPath', 'leftProfilePhoto', t('leftProfile')],
+          ['rightProfilePhotoPath', 'rightProfilePhoto', t('rightProfile')],
+          ['portraitPhotoPath', 'portraitPhoto', t('portrait')],
+          ['introVideoPath', 'introVideo', t('introVideo')]
+        ];
+      }
       var taxonomy = ${taxonomy};
       var taxonomyByValue = {};
       Object.keys(taxonomy).forEach(function (field) {
@@ -591,7 +782,7 @@ function candidateAdminHtml() {
           return '<button type="button" class="choice' + (selected.includes(value) ? ' active' : '') + '" data-filter="' + id + '" data-value="' + esc(value) + '">' + esc(display) + '</button>';
         }).join('');
         return '<div class="filterField"><div class="filterLabel">' + label + '</div><div class="choiceGroup">' +
-          '<button type="button" class="choice clear' + (!selected.length ? ' active' : '') + '" data-filter-clear="' + id + '">Все</button>' +
+          '<button type="button" class="choice clear' + (!selected.length ? ' active' : '') + '" data-filter-clear="' + id + '">' + t('all') + '</button>' +
           (options || '<span class="muted small">Нет данных</span>') +
           '</div></div>';
       }
@@ -605,9 +796,9 @@ function candidateAdminHtml() {
           '</select></label>';
       }
       function statusLabel(status) {
-        if (status === 'approved' || status === 'verified') return 'Активно';
-        if (status === 'rejected') return 'Отклонен';
-        return 'На проверке';
+        if (status === 'approved' || status === 'verified') return t('approved');
+        if (status === 'rejected') return t('rejected');
+        return t('pendingStatus');
       }
       function statusClass(status) {
         if (status === 'approved' || status === 'verified') return 'approved';
@@ -647,9 +838,10 @@ function candidateAdminHtml() {
       }
       function mediaFilterButtons() {
         var active = Object.keys(filters.media).filter(function (key) { return filters.media[key]; });
+        var mf = getMediaFields();
         return '<div class="mediaFilters">' +
-          '<button type="button" class="choice clear' + (!active.length ? ' active' : '') + '" id="clearMediaFilters">Все медиа</button>' +
-          mediaFields.map(function (item) {
+          '<button type="button" class="choice clear' + (!active.length ? ' active' : '') + '" id="clearMediaFilters">' + t('allMedia') + '</button>' +
+          mf.map(function (item) {
             return '<button type="button" class="choice' + (filters.media[item[0]] ? ' active' : '') + '" data-media="' + item[0] + '">' + item[2] + '</button>';
           }).join('') +
           '</div>';
@@ -695,7 +887,11 @@ function candidateAdminHtml() {
           headers: { 'content-type': 'application/json', 'x-admin-token': token }
         }, options || {}));
         var data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'API error');
+        if (!response.ok) {
+          var err = new Error(data.error || 'API error');
+          err.status = response.status;
+          throw err;
+        }
         return data;
       }
       async function load() {
@@ -706,9 +902,12 @@ function candidateAdminHtml() {
           applyFilters();
           renderApp();
         } catch (error) {
-          localStorage.removeItem('face-admin-token');
-          token = '';
-          renderLogin(error.message);
+          if (error.status === 401 || error.status === 403) {
+            localStorage.removeItem('face-admin-token');
+            token = '';
+            renderLogin(error.message);
+          }
+          // DB/network errors don't log out — just silently skip refresh
         }
       }
       async function decide(id, action) {
@@ -730,49 +929,53 @@ function candidateAdminHtml() {
       }
       function renderLogin(error) {
         document.body.style.overflow = '';
-        root.innerHTML = '<main class="login"><section class="loginCard"><div class="mark">FP</div><div><p class="muted">FACE Production</p><h1>Платформа талантов</h1></div><input id="pass" type="password" placeholder="Код администратора" autofocus><button id="login" class="primary">Войти</button>' + (error ? '<p class="notice">' + esc(error) + '</p>' : '') + '</section></main>';
-        document.getElementById('login').onclick = function () {
+        var langBtns = ['ru','uz','en'].map(function(l) { return '<button type="button" class="langBtn' + (lang === l ? ' active' : '') + '" data-lang="' + l + '">' + l.toUpperCase() + '</button>'; }).join('');
+        root.innerHTML = '<main class="login"><section class="loginCard"><div class="mark">FP</div><div><p class="muted">FACE Production</p><h1>' + t('brand') + '</h1></div><input id="pass" type="password" placeholder="' + t('adminCode') + '" autofocus><button id="loginBtn" class="primary">' + t('login') + '</button>' + (error ? '<p class="notice">' + esc(error) + '</p>' : '') + '<div class="langRow">' + langBtns + '</div></section></main>';
+        document.getElementById('loginBtn').onclick = function () {
           token = document.getElementById('pass').value.trim();
           localStorage.setItem('face-admin-token', token);
           load();
         };
         document.getElementById('pass').onkeydown = function (event) {
-          if (event.key === 'Enter') document.getElementById('login').click();
+          if (event.key === 'Enter') document.getElementById('loginBtn').click();
         };
+        document.querySelectorAll('[data-lang]').forEach(function(btn) {
+          btn.onclick = function() { lang = btn.dataset.lang; localStorage.setItem('face-admin-lang', lang); renderLogin(error); };
+        });
       }
       function renderFilters() {
         var cityOptions = optionValues('city');
         var genderOptions = optionValues('gender');
         var sourceOptions = optionValues('source');
-        var resultNote = activePage === 'posts' ? 'Выбор получателей ниже' : 'Результаты сортируются по рейтингу';
+        var resultNote = activePage === 'posts' ? t('resultNote_posts') : t('resultNote_others');
         var mainBody = '<div class="filterGrid">' +
-          choiceGroup('city', 'Город', cityOptions, filters.city) +
-          choiceGroup('gender', 'Пол', genderOptions, filters.gender) +
-          choiceGroup('source', 'Источник', sourceOptions, filters.source) +
+          choiceGroup('city', t('city'), cityOptions, filters.city) +
+          choiceGroup('gender', t('gender'), genderOptions, filters.gender) +
+          choiceGroup('source', t('source'), sourceOptions, filters.source) +
           '</div>';
         var additionalBody = '<div class="rangeGrid">' +
-          '<label>Возраст от<input id="ageMin" type="number" value="' + esc(filters.ageMin) + '"></label><label>Возраст до<input id="ageMax" type="number" value="' + esc(filters.ageMax) + '"></label>' +
-          '<label>Рост от<input id="heightMin" type="number" value="' + esc(filters.heightMin) + '"></label><label>Рост до<input id="heightMax" type="number" value="' + esc(filters.heightMax) + '"></label>' +
-          '<label>Вес от<input id="weightMin" type="number" value="' + esc(filters.weightMin) + '"></label><label>Вес до<input id="weightMax" type="number" value="' + esc(filters.weightMax) + '"></label>' +
-          '<label>Создан от<input id="createdFrom" type="date" value="' + esc(filters.createdFrom) + '"></label><label>Создан до<input id="createdTo" type="date" value="' + esc(filters.createdTo) + '"></label>' +
-          '<label>Обновлен от<input id="updatedFrom" type="date" value="' + esc(filters.updatedFrom) + '"></label><label>Обновлен до<input id="updatedTo" type="date" value="' + esc(filters.updatedTo) + '"></label>' +
+          '<label>' + t('ageFrom') + '<input id="ageMin" type="number" value="' + esc(filters.ageMin) + '"></label><label>' + t('ageTo') + '<input id="ageMax" type="number" value="' + esc(filters.ageMax) + '"></label>' +
+          '<label>' + t('heightFrom') + '<input id="heightMin" type="number" value="' + esc(filters.heightMin) + '"></label><label>' + t('heightTo') + '<input id="heightMax" type="number" value="' + esc(filters.heightMax) + '"></label>' +
+          '<label>' + t('weightFrom') + '<input id="weightMin" type="number" value="' + esc(filters.weightMin) + '"></label><label>' + t('weightTo') + '<input id="weightMax" type="number" value="' + esc(filters.weightMax) + '"></label>' +
+          '<label>' + t('createdFrom') + '<input id="createdFrom" type="date" value="' + esc(filters.createdFrom) + '"></label><label>' + t('createdTo') + '<input id="createdTo" type="date" value="' + esc(filters.createdTo) + '"></label>' +
+          '<label>' + t('updatedFrom') + '<input id="updatedFrom" type="date" value="' + esc(filters.updatedFrom) + '"></label><label>' + t('updatedTo') + '<input id="updatedTo" type="date" value="' + esc(filters.updatedTo) + '"></label>' +
           '</div>';
         var talentsBody = '<div class="filterGrid">' +
-          choiceGroup('performance', 'Сценические таланты', optionValues('performanceTalents'), filters.performance) +
-          choiceGroup('sports', 'Спорт', optionValues('sportsTalents'), filters.sports) +
-          choiceGroup('physical', 'Физические навыки', optionValues('physicalSkills'), filters.physical) +
-          choiceGroup('languages', 'Языки', optionValues('languageSkills'), filters.languages) +
-          choiceGroup('appearance', 'Внешность', optionValues('appearance'), filters.appearance) +
+          choiceGroup('performance', t('performance'), optionValues('performanceTalents'), filters.performance) +
+          choiceGroup('sports', t('sports'), optionValues('sportsTalents'), filters.sports) +
+          choiceGroup('physical', t('physical'), optionValues('physicalSkills'), filters.physical) +
+          choiceGroup('languages', t('languages'), optionValues('languageSkills'), filters.languages) +
+          choiceGroup('appearance', t('appearance'), optionValues('appearance'), filters.appearance) +
           '</div>';
-        return '<section class="filters"><input class="search" id="q" placeholder="Поиск: имя, телефон, Telegram, ID" value="' + esc(filters.q) + '">' +
-          renderFilterSection('main', 'Основные фильтры', mainBody) +
-          renderFilterSection('additional', 'Дополнительные фильтры', additionalBody) +
-          renderFilterSection('talents', 'Таланты и внешность', talentsBody) +
-          renderFilterSection('media', 'Медиа', mediaFilterButtons()) +
-          '<div class="actions"><button class="secondary" id="clearFilters">Сбросить фильтры</button><strong>Найдено: ' + filtered.length + ' / ' + pageTotalCount() + '</strong><span class="muted">' + resultNote + '</span></div></section>';
+        return '<section class="filters"><input class="search" id="q" placeholder="' + t('search') + '" value="' + esc(filters.q) + '">' +
+          renderFilterSection('main', t('filter_main'), mainBody) +
+          renderFilterSection('additional', t('filter_additional'), additionalBody) +
+          renderFilterSection('talents', t('filter_talents'), talentsBody) +
+          renderFilterSection('media', t('filter_media'), mediaFilterButtons()) +
+          '<div class="actions"><button class="secondary" id="clearFilters">' + t('clearFilters') + '</button><strong>' + t('found') + ': ' + filtered.length + ' / ' + pageTotalCount() + '</strong><span class="muted">' + resultNote + '</span></div></section>';
       }
       function renderFilterSection(id, title, body) {
-        return '<div class="filterSection"><button type="button" class="filterToggle" data-filter-toggle="' + id + '">' + esc(title) + '<span>' + (filterSections[id] ? 'Скрыть' : 'Показать') + '</span></button>' +
+        return '<div class="filterSection"><button type="button" class="filterToggle" data-filter-toggle="' + id + '">' + esc(title) + '<span>' + (filterSections[id] ? t('hide') : t('show')) + '</span></button>' +
           (filterSections[id] ? body : '') +
           '</div>';
       }
@@ -784,10 +987,10 @@ function candidateAdminHtml() {
         return Boolean(candidate.telegramChatId);
       }
       function renderRecipientList() {
-        if (!filtered.length) return '<div class="empty">Нет кандидатов по текущему фильтру</div>';
+        if (!filtered.length) return '<div class="empty">' + t('noRecipients') + '</div>';
         return '<div class="recipientList">' + filtered.map(function (candidate) {
           var checked = selectedIds.includes(candidate.id);
-          return '<label class="recipientItem"><input type="checkbox" data-recipient="' + esc(candidate.id) + '" ' + (checked ? 'checked' : '') + '><div><strong>' + esc(candidate.name || '-') + '</strong><div class="recipientMeta">' + esc(candidate.id) + ' · ' + esc(candidate.city || '-') + ' · ' + esc(candidate.gender || '-') + ' · ' + esc(candidate.age || '-') + '</div></div><span class="telegramBadge' + (hasTelegram(candidate) ? '' : ' missing') + '">' + (hasTelegram(candidate) ? 'Telegram' : 'Нет Telegram') + '</span></label>';
+          return '<label class="recipientItem"><input type="checkbox" data-recipient="' + esc(candidate.id) + '" ' + (checked ? 'checked' : '') + '><div><strong>' + esc(candidate.name || '-') + '</strong><div class="recipientMeta">' + esc(candidate.id) + ' · ' + esc(candidate.city || '-') + ' · ' + esc(candidate.gender || '-') + ' · ' + esc(candidate.age || '-') + '</div></div><span class="telegramBadge' + (hasTelegram(candidate) ? '' : ' missing') + '">' + (hasTelegram(candidate) ? t('hasTelegram') : t('noTelegram')) + '</span></label>';
         }).join('') + '</div>';
       }
       function renderPostsPage() {
@@ -796,12 +999,12 @@ function candidateAdminHtml() {
         var foundTelegram = filtered.filter(hasTelegram).length;
         var sendDisabled = selected.length ? '' : ' disabled';
         return '<section class="postPage">' +
-          '<section class="postPanel"><div class="sectionHeader"><div><p class="muted">Посты отправляются только одобренным кандидатам.</p><h3>Получатели</h3></div><div class="statRow"><span class="statPill">Найдено: ' + filtered.length + '</span><span class="statPill">Выбрано: ' + selected.length + '</span><span class="statPill">Telegram: ' + selectedTelegram + ' / ' + foundTelegram + '</span></div></div>' +
-          '<div class="recipientToolbar"><span class="muted">Список формируется фильтрами выше</span><div class="actions"><button class="secondary" id="selectFiltered">Выбрать найденных</button><button class="secondary" id="clearSelected">Снять выбор</button></div></div>' +
+          '<section class="postPanel"><div class="sectionHeader"><div><p class="muted">' + t('postsOnly') + '</p><h3>' + t('messageRecipients') + '</h3></div><div class="statRow"><span class="statPill">' + t('foundShort') + ' ' + filtered.length + '</span><span class="statPill">' + t('selectedShort') + ' ' + selected.length + '</span><span class="statPill">Telegram: ' + selectedTelegram + ' / ' + foundTelegram + '</span></div></div>' +
+          '<div class="recipientToolbar"><span class="muted">' + t('listByFilters') + '</span><div class="actions"><button class="secondary" id="selectFiltered">' + t('selectFiltered') + '</button><button class="secondary" id="clearSelected">' + t('deselect') + '</button></div></div>' +
           renderRecipientList() + '</section>' +
           '<section class="postGrid">' +
-          '<div class="postCard"><div><p class="filterLabel">Обычный пост</p><h3>Сообщение выбранным</h3></div><textarea id="bulkText" placeholder="Текст сообщения">' + esc(postDraft.bulkText) + '</textarea><div class="actions"><button class="primary" id="sendBulk"' + sendDisabled + '>Отправить пост</button><span class="muted" id="bulkResult"></span></div></div>' +
-          '<div class="postCard"><div><p class="filterLabel">Кастинг-пост</p><h3>Новый кастинг</h3></div><input class="search" id="castingTitle" placeholder="Название кастинга" value="' + esc(postDraft.castingTitle) + '"><textarea id="castingBody" placeholder="Описание проекта, кого ищем, условия, адрес, контакт.">' + esc(postDraft.castingBody) + '</textarea><div class="composerDates"><label>Старт<input id="castingStart" type="datetime-local" value="' + esc(postDraft.castingStart) + '"></label><label>Конец<input id="castingEnd" type="datetime-local" value="' + esc(postDraft.castingEnd) + '"></label></div><div class="actions"><button class="primary" id="sendCasting"' + sendDisabled + '>Создать и отправить</button><span class="muted" id="castingResult"></span></div></div>' +
+          '<div class="postCard"><div><p class="filterLabel">' + t('regularPost') + '</p><h3>' + t('messageSelected') + '</h3></div><textarea id="bulkText" placeholder="' + t('messageText') + '">' + esc(postDraft.bulkText) + '</textarea><div class="actions"><button class="primary" id="sendBulk"' + sendDisabled + '>' + t('sendPost') + '</button><span class="muted" id="bulkResult"></span></div></div>' +
+          '<div class="postCard"><div><p class="filterLabel">' + t('castingPostLabel') + '</p><h3>' + t('newCasting') + '</h3></div><input class="search" id="castingTitle" placeholder="' + t('castingTitlePlaceholder') + '" value="' + esc(postDraft.castingTitle) + '"><textarea id="castingBody" placeholder="' + t('castingBodyPlaceholder') + '">' + esc(postDraft.castingBody) + '</textarea><div class="composerDates"><label>' + t('castingStart') + '<input id="castingStart" type="datetime-local" value="' + esc(postDraft.castingStart) + '"></label><label>' + t('castingEnd') + '<input id="castingEnd" type="datetime-local" value="' + esc(postDraft.castingEnd) + '"></label></div><div class="actions"><button class="primary" id="sendCasting"' + sendDisabled + '>' + t('createSend') + '</button><span class="muted" id="castingResult"></span></div></div>' +
           '</section></section>';
       }
       function bindFilters() {
@@ -847,8 +1050,8 @@ function candidateAdminHtml() {
         };
       }
       function renderTable() {
-        if (!filtered.length) return '<section class="panel empty">Нет кандидатов по текущим фильтрам</section>';
-        return '<section class="panel"><table><thead><tr><th>Кандидат</th><th>Город</th><th>Пол</th><th>Возраст</th><th>Рейтинг</th><th>Статус</th></tr></thead><tbody>' +
+        if (!filtered.length) return '<section class="panel empty">' + t('noResults') + '</section>';
+        return '<section class="panel"><table><thead><tr><th>' + t('candidate') + '</th><th>' + t('city') + '</th><th>' + t('gender') + '</th><th>' + t('age') + '</th><th>' + t('rating') + '</th><th>' + t('status') + '</th></tr></thead><tbody>' +
           filtered.map(function (candidate) {
             return '<tr data-id="' + esc(candidate.id) + '" class="' + (candidate.id === selectedId ? 'selected' : '') + '"><td><strong>' + esc(candidate.name || '-') + '</strong><span>' + esc(candidate.id) + ' · ' + esc(candidate.phone || '') + '</span></td><td>' + esc(candidate.city || '-') + '</td><td>' + esc(candidate.gender || '-') + '</td><td>' + esc(candidate.age || '-') + '</td><td><strong>' + ratingValue(candidate).toFixed(2) + '</strong><span>' + starText(ratingValue(candidate)) + '</span></td><td><span class="status ' + statusClass(candidate.status) + '">' + statusLabel(candidate.status) + '</span></td></tr>';
           }).join('') +
@@ -862,25 +1065,26 @@ function candidateAdminHtml() {
         if (!candidate) return '';
         var isPendingPage = activePage === 'pending';
         var portrait = candidate.portraitPhotoPath || candidate.photoPath;
-        var media = mediaFields.filter(function (item) { return candidate[item[0]] || (item[0] === 'portraitPhotoPath' && candidate.photoPath); }).map(function (item) {
+        var mf = getMediaFields();
+        var media = mf.filter(function (item) { return candidate[item[0]] || (item[0] === 'portraitPhotoPath' && candidate.photoPath); }).map(function (item) {
           if (item[1] === 'introVideo') return '<figure class="videoTile"><video controls src="' + mediaUrl(candidate.id, item[1]) + '"></video><figcaption>' + esc(item[2]) + '</figcaption></figure>';
           return '<figure><img src="' + mediaUrl(candidate.id, item[1]) + '" alt="' + esc(item[2]) + '"><figcaption>' + esc(item[2]) + '</figcaption></figure>';
         }).join('');
-        return '<div class="drawerOverlay" id="detailDrawer"><aside class="detail"><div class="drawerTop"><button class="iconButton" id="closeDetail" title="Закрыть">×</button></div><div class="profileHead">' +
-          (portrait ? '<img class="photo" src="' + mediaUrl(candidate.id, 'portraitPhoto') + '" alt="Фото">' : '<div class="avatar">' + esc(String(candidate.name || '?').slice(0, 1)) + '</div>') +
+        return '<div class="drawerOverlay" id="detailDrawer"><aside class="detail"><div class="drawerTop"><button class="iconButton" id="closeDetail" title="' + t('hide') + '">×</button></div><div class="profileHead">' +
+          (portrait ? '<img class="photo" src="' + mediaUrl(candidate.id, 'portraitPhoto') + '" alt="' + t('photo') + '">' : '<div class="avatar">' + esc(String(candidate.name || '?').slice(0, 1)) + '</div>') +
           '<div><p class="muted">' + esc(candidate.id) + '</p><h3>' + esc(candidate.name || '-') + '</h3><p class="muted">' + esc(candidate.age || '-') + ' · ' + esc(candidate.city || '-') + '</p></div></div>' +
-          (media ? '<section class="media">' + media + '</section>' : '<p class="notice">Медиа не загружено</p>') +
+          (media ? '<section class="media">' + media + '</section>' : '<p class="notice">' + t('noMedia') + '</p>') +
           '<section class="facts">' +
-          fact('Статус', statusLabel(candidate.status)) + fact('Тип анкеты', candidate.submissionMode === 'friend' ? 'За друга' : 'Личная') + fact('Заполнил', submitterLabel(candidate) || '-') + fact('Рейтинг', ratingValue(candidate).toFixed(2) + ' ' + starText(ratingValue(candidate))) + fact('Телефон', candidate.phone) + fact('Telegram кандидата', candidate.telegramUsername ? '@' + candidate.telegramUsername : candidate.telegramUserId) + fact('Пол', candidate.gender) + fact('Рост', candidate.height) + fact('Вес', candidate.weight) + fact('Внешность', displayTalentList(candidate.appearance)) + fact('Сценические таланты', displayTalentList(candidate.performanceTalents)) + fact('Спорт', displayTalentList(candidate.sportsTalents)) + fact('Физические навыки', displayTalentList(candidate.physicalSkills)) + fact('Языки', displayTalentList(candidate.languageSkills)) + fact('Создан', candidate.createdAt) + fact('Обновлен', candidate.updatedAt) +
+          fact(t('status'), statusLabel(candidate.status)) + fact(t('type'), candidate.submissionMode === 'friend' ? t('forFriend') : t('personal')) + fact(t('filledBy'), submitterLabel(candidate) || '-') + fact(t('rating'), ratingValue(candidate).toFixed(2) + ' ' + starText(ratingValue(candidate))) + fact(t('phone'), candidate.phone) + fact(t('telegramCandidate'), candidate.telegramUsername ? '@' + candidate.telegramUsername : candidate.telegramUserId) + fact(t('gender'), candidate.gender) + fact(t('height'), candidate.height) + fact(t('weight'), candidate.weight) + fact(t('appearance'), displayTalentList(candidate.appearance)) + fact(t('performance'), displayTalentList(candidate.performanceTalents)) + fact(t('sports'), displayTalentList(candidate.sportsTalents)) + fact(t('physical'), displayTalentList(candidate.physicalSkills)) + fact(t('languages'), displayTalentList(candidate.languageSkills)) + fact(t('createdAt'), candidate.createdAt) + fact(t('updatedAt'), candidate.updatedAt) +
           '</section>' +
           (isPendingPage ? renderRatingControl(candidate) : '') +
-          '<div><p class="filterLabel">Сообщение в Telegram</p><textarea id="singleText" placeholder="Написать кандидату или отправителю анкеты">' + esc(draftMessages[candidate.id] || '') + '</textarea><div class="actions"><button class="primary" id="sendSingle">Отправить</button><span class="muted" id="singleResult"></span></div></div><div class="actions">' +
-          (isPendingPage ? '<button class="primary" id="approve">Одобрить</button><button class="danger" id="reject">Отклонить</button>' : '') +
-          '<button class="secondary" id="openProfile">Открыть профиль</button></div></aside></div>';
+          '<div><p class="filterLabel">' + t('messageTelegram') + '</p><textarea id="singleText" placeholder="' + t('messagePlaceholder') + '">' + esc(draftMessages[candidate.id] || '') + '</textarea><div class="actions"><button class="primary" id="sendSingle">' + t('send') + '</button><span class="muted" id="singleResult"></span></div></div><div class="actions">' +
+          (isPendingPage ? '<button class="primary" id="approve">' + t('approve') + '</button><button class="danger" id="reject">' + t('reject') + '</button>' : '') +
+          '<button class="secondary" id="openProfile">' + t('openProfile') + '</button></div></aside></div>';
       }
       function renderRatingControl(candidate) {
         var value = draftRatingValue(candidate).toFixed(2);
-        return '<section class="ratingBox"><div><p class="filterLabel">Рейтинг заявки</p><div class="ratingStars" id="ratingStars">' + starText(value) + '</div></div><div class="ratingControls"><input id="ratingInput" type="range" min="0" max="5" step="0.25" value="' + esc(value) + '"><div class="ratingValue" id="ratingValue">' + esc(value) + '</div></div><div class="actions"><button class="secondary" id="saveRating">Сохранить рейтинг</button><span class="muted" id="ratingResult"></span></div></section>';
+        return '<section class="ratingBox"><div><p class="filterLabel">' + t('ratingLabel') + '</p><div class="ratingStars" id="ratingStars">' + starText(value) + '</div></div><div class="ratingControls"><input id="ratingInput" type="range" min="0" max="5" step="0.25" value="' + esc(value) + '"><div class="ratingValue" id="ratingValue">' + esc(value) + '</div></div><div class="actions"><button class="secondary" id="saveRating">' + t('saveRating') + '</button><span class="muted" id="ratingResult"></span></div></section>';
       }
       function bindTableAndDetail() {
         document.querySelectorAll('[data-id]').forEach(function (row) {
@@ -1023,12 +1227,13 @@ function candidateAdminHtml() {
         var isPosts = activePage === 'posts';
         var isPending = activePage === 'pending';
         var isCandidates = activePage === 'candidates';
-        var title = isPosts ? 'Посты' : isPending ? 'Заявки' : 'Кандидаты';
+        var pageTitle = isPosts ? t('postsPage') : isPending ? t('pendingPage') : t('candidatesPage');
         var body = isPosts
           ? renderFilters() + renderPostsPage()
           : renderFilters() + '<section class="layout">' + renderTable() + renderDetail() + '</section>';
-        var exportAction = isCandidates ? '<button class="secondary" id="export">Экспорт всей базы</button>' : '';
-        root.innerHTML = '<main class="app"><aside class="sidebar"><div class="brand"><div class="mark">FP</div><div><strong>FACE Production</strong><p class="muted">Платформа талантов</p></div></div><button class="nav ' + (isPending ? 'active' : '') + '" data-page="pending">Заявки</button><button class="nav ' + (isCandidates ? 'active' : '') + '" data-page="candidates">Кандидаты</button><button class="nav ' + (isPosts ? 'active' : '') + '" data-page="posts">Посты</button></aside><section class="workspace"><header class="topbar"><div><p class="muted">Консоль MVP</p><h2>' + title + '</h2></div><div class="actions"><button class="secondary" id="refresh">Обновить</button>' + exportAction + '<button class="secondary" id="logout">Выйти</button></div></header>' + body + '</section></main>';
+        var exportAction = isCandidates ? '<button class="secondary" id="export">' + t('export') + '</button>' : '';
+        var langBtns = ['ru','uz','en'].map(function(l) { return '<button type="button" class="langBtn' + (lang === l ? ' active' : '') + '" data-lang="' + l + '">' + l.toUpperCase() + '</button>'; }).join('');
+        root.innerHTML = '<main class="app"><aside class="sidebar"><div class="brand"><div class="mark">FP</div><div><strong>FACE Production</strong><p class="muted">' + t('brand') + '</p></div></div><button class="nav ' + (isPending ? 'active' : '') + '" data-page="pending">' + t('pendingPage') + '</button><button class="nav ' + (isCandidates ? 'active' : '') + '" data-page="candidates">' + t('candidatesPage') + '</button><button class="nav ' + (isPosts ? 'active' : '') + '" data-page="posts">' + t('postsPage') + '</button><div class="langRow">' + langBtns + '</div></aside><section class="workspace"><header class="topbar"><div><p class="muted">' + t('title') + '</p><h2>' + pageTitle + '</h2></div><div class="actions"><button class="secondary" id="refresh">' + t('refresh') + '</button>' + exportAction + '<button class="secondary" id="logout">' + t('logout') + '</button></div></header>' + body + '</section></main>';
         bindNavigation();
         if (isPosts) {
           bindFilters();
@@ -1041,9 +1246,12 @@ function candidateAdminHtml() {
         var exportButton = document.getElementById('export');
         if (exportButton) exportButton.onclick = function () { window.location.href = '/api/candidates/export.csv?token=' + encodeURIComponent(token); };
         document.getElementById('logout').onclick = function () { localStorage.removeItem('face-admin-token'); token = ''; renderLogin(); };
+        document.querySelectorAll('[data-lang]').forEach(function(btn) {
+          btn.onclick = function() { lang = btn.dataset.lang; localStorage.setItem('face-admin-lang', lang); renderApp(); };
+        });
       }
       if (token) load(); else renderLogin();
-      setInterval(function () { if (token && activePage !== 'posts' && !hasActiveEditor()) load(); }, 5000);
+      setInterval(function () { if (token && activePage !== 'posts' && !hasActiveEditor() && !selectedId) load(); }, 5000);
     })();
   </script>
 </body>
@@ -1217,7 +1425,14 @@ export async function routeRequest(request, response) {
     }
 
     const update = await readJson(request)
-    const result = await handleBotUpdate(update)
+    let result
+    try {
+      result = await handleBotUpdate(update)
+    } catch (error) {
+      console.error('webhook handler failed:', error?.stack ?? error)
+      sendJson(response, 200, { ok: false, error: error?.message ?? 'handler_error' })
+      return
+    }
     sendJson(response, 200, { ok: true, result })
     return
   }
@@ -1466,7 +1681,7 @@ export async function routeRequest(request, response) {
       return
     }
 
-    sendImage(response, photo)
+    sendImage(response, photo, request)
     return
   }
 
@@ -1490,7 +1705,7 @@ export async function routeRequest(request, response) {
       return
     }
 
-    sendMedia(response, media, mediaContentType(kind, candidate))
+    sendMedia(response, media, mediaContentType(kind, candidate), request)
     return
   }
 

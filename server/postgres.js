@@ -30,7 +30,7 @@ export function getPostgresPool() {
       connectionString: process.env.DATABASE_URL,
       connectionTimeoutMillis: Number(process.env.DATABASE_CONNECTION_TIMEOUT_MS ?? 10000),
       idleTimeoutMillis: Number(process.env.DATABASE_IDLE_TIMEOUT_MS ?? 30000),
-      max: Number(process.env.DATABASE_POOL_MAX ?? 3),
+      max: Number(process.env.DATABASE_POOL_MAX ?? (process.env.VERCEL ? 1 : 3)),
       ssl: shouldUseSsl() ? { rejectUnauthorized: false } : undefined,
     })
   }

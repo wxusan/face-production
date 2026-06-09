@@ -38,22 +38,12 @@ const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === resolv
 const totalProgressSteps = 18
 
 const exampleMediaPaths = {
-  fallbackIntroVideo: '/Users/xusan/Downloads/7a373788-8343-4351-83f7-f5f9fd8af9ef_hd.mp4',
+  fallbackIntroVideo: 's3://face-candidate-media/examples/male-intro.mp4',
   female: {
-    closeShotPhoto: '/Users/xusan/Downloads/Ayol yaqinroq.jpeg',
-    fullBodyPhoto: '/Users/xusan/Downloads/Professional_fashion_photography,_medium_shot._202606042135.jpeg',
-    introVideo: '/Users/xusan/Downloads/Ayol vizitka.mp4',
-    leftProfilePhoto: '/Users/xusan/Downloads/Ayol chap.jpeg',
-    portraitPhoto: '/Users/xusan/Downloads/Ayol portrait.jpeg',
-    rightProfilePhoto: "/Users/xusan/Downloads/ayol o'ng.jpeg",
+    introVideo: 's3://face-candidate-media/examples/female-intro.mp4',
   },
   male: {
-    closeShotPhoto: '/Users/xusan/Downloads/closer shot.PNG',
-    fullBodyPhoto: '/Users/xusan/Downloads/Full body.PNG',
-    introVideo: '/Users/xusan/Downloads/Erkak vizitka.mp4',
-    leftProfilePhoto: '/Users/xusan/Downloads/left profile.PNG',
-    portraitPhoto: '/Users/xusan/Downloads/portait.PNG',
-    rightProfilePhoto: '/Users/xusan/Downloads/right profile.PNG',
+    introVideo: 's3://face-candidate-media/examples/male-intro.mp4',
   },
 }
 
@@ -771,11 +761,19 @@ function genderCodeForData(data) {
 
 function exampleMediaPath(session, kind) {
   const genderCode = genderCodeForData(session.data)
-  return exampleMediaPaths[genderCode]?.[kind] ?? exampleMediaPaths.male[kind]
+  return exampleMediaPaths[genderCode]?.[kind] ?? exampleMediaPaths.male[kind] ?? null
 }
 
 async function videoExamplePath(session) {
   const preferredPath = exampleMediaPath(session, 'introVideo')
+
+  if (preferredPath == null) {
+    return exampleMediaPaths.fallbackIntroVideo
+  }
+
+  if (preferredPath.startsWith('s3://')) {
+    return preferredPath
+  }
 
   try {
     const info = await stat(preferredPath)
@@ -2025,22 +2023,41 @@ export async function handleBotUpdate(update) {
   }
 
   try {
-    if (query) {
-      console.log(`Callback ${update.update_id}: from=${query.from.id} data=${query.data}`)
-      await handleCallback(query)
-      return { handled: true, type: 'callback_query' }
+    try {
+      if (query) {
+        console.log(`Callback ${update.update_id}: from=${query.from.id} data=${query.data}`)
+        await handleCallback(query)
+        return { handled: true, type: 'callback_query' }
+      }
+
+      if (!message?.chat?.id || !message.from?.id) {
+        return { handled: false, reason: 'unsupported_update' }
+      }
+
+      const chatId = message.chat.id
+      const label = message.text ?? (message.contact ? '[contact]' : message.photo ? '[photo]' : message.video ? '[video]' : '[non-text]')
+      console.log(`Update ${update.update_id}: from=${message.from.id} chat=${chatId} text=${label}`)
+
+      await handleTextMessage(chatId, message.from, message)
+      return { handled: true, type: 'message' }
+    } catch (error) {
+      console.error('handleBotUpdate failed:', error?.stack ?? error)
+
+      const session = userId ? sessions.get(userId) : undefined
+      const errorChatId = message?.chat?.id ?? query?.message?.chat?.id
+      const lang = session?.lang ?? 'ru'
+      const errorText = text[lang]?.unknown ?? 'Произошла ошибка. Попробуйте позже.'
+
+      if (errorChatId) {
+        try {
+          await send(errorChatId, errorText)
+        } catch (sendError) {
+          console.error('Failed to notify user of error:', sendError?.message ?? sendError)
+        }
+      }
+
+      return { handled: false, error: error?.message ?? 'unknown' }
     }
-
-    if (!message?.chat?.id || !message.from?.id) {
-      return { handled: false, reason: 'unsupported_update' }
-    }
-
-    const chatId = message.chat.id
-    const label = message.text ?? (message.contact ? '[contact]' : message.photo ? '[photo]' : message.video ? '[video]' : '[non-text]')
-    console.log(`Update ${update.update_id}: from=${message.from.id} chat=${chatId} text=${label}`)
-
-    await handleTextMessage(chatId, message.from, message)
-    return { handled: true, type: 'message' }
   } finally {
     if (userId) {
       await persistSession(userId)
