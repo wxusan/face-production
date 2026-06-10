@@ -3,7 +3,7 @@ import pg from 'pg'
 const { Pool } = pg
 
 let pool
-let schemaReady = false
+let schemaInitPromise = null
 
 export function hasPostgres() {
   return Boolean(process.env.DATABASE_URL)
@@ -47,11 +47,7 @@ export async function rawQuery(sql, params = []) {
   return getPostgresPool().query(sql, params)
 }
 
-export async function ensurePostgresSchema() {
-  if (!hasPostgres() || schemaReady) {
-    return
-  }
-
+async function _runSchemaInit() {
   const client = await getPostgresPool().connect()
 
   try {
@@ -116,7 +112,6 @@ export async function ensurePostgresSchema() {
     await client.query('CREATE INDEX IF NOT EXISTS castings_status_idx ON castings (status)')
     await client.query('CREATE INDEX IF NOT EXISTS castings_starts_at_idx ON castings (starts_at)')
     await client.query('COMMIT')
-    schemaReady = true
   } catch (error) {
     await client.query('ROLLBACK')
     throw error
@@ -124,3 +119,22 @@ export async function ensurePostgresSchema() {
     client.release()
   }
 }
+
+function startSchemaInit() {
+  if (!hasPostgres()) return
+  schemaInitPromise = _runSchemaInit()
+  schemaInitPromise.catch((err) => {
+    console.error('Schema init failed, will retry:', err.message)
+    schemaInitPromise = null
+  })
+}
+
+export async function ensurePostgresSchema() {
+  if (!hasPostgres()) return
+  if (!schemaInitPromise) {
+    schemaInitPromise = _runSchemaInit()
+  }
+  return schemaInitPromise
+}
+
+startSchemaInit()

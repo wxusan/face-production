@@ -28,6 +28,7 @@ const adminId = adminIds[0] ?? ''
 const apiBase = `https://api.telegram.org/bot${token}`
 const telegramChannelUrl = String(process.env.TELEGRAM_CHANNEL_URL ?? '').trim()
 const sessions = new Map()
+const exampleFileIdCache = new Map()
 
 if (!token) {
   throw new Error('TELEGRAM_BOT_TOKEN is missing')
@@ -511,7 +512,11 @@ async function uploadFile(method, fields, fileField, filePath) {
 }
 
 async function sendLocalPhoto(chatId, filePath, caption) {
-  return uploadFile(
+  const cachedFileId = exampleFileIdCache.get(filePath)
+  if (cachedFileId) {
+    return call('sendPhoto', { chat_id: chatId, photo: cachedFileId, caption })
+  }
+  const result = await uploadFile(
     'sendPhoto',
     {
       caption,
@@ -520,10 +525,17 @@ async function sendLocalPhoto(chatId, filePath, caption) {
     'photo',
     filePath,
   )
+  const fileId = result.photo.at(-1).file_id
+  exampleFileIdCache.set(filePath, fileId)
+  return result
 }
 
 async function sendLocalVideo(chatId, filePath, caption) {
-  return uploadFile(
+  const cachedFileId = exampleFileIdCache.get(filePath)
+  if (cachedFileId) {
+    return call('sendVideo', { chat_id: chatId, video: cachedFileId, caption, supports_streaming: true })
+  }
+  const result = await uploadFile(
     'sendVideo',
     {
       caption,
@@ -533,6 +545,9 @@ async function sendLocalVideo(chatId, filePath, caption) {
     'video',
     filePath,
   )
+  const fileId = result.video.file_id
+  exampleFileIdCache.set(filePath, fileId)
+  return result
 }
 
 async function sendLocalMediaGroup(chatId, mediaItems) {
