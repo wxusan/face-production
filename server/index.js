@@ -990,7 +990,7 @@ function candidateAdminHtml() {
         return selectedIds.filter(function (id) { return filteredIds.has(id); });
       }
       function hasTelegram(candidate) {
-        return Boolean(candidate.telegramChatId);
+        return Boolean(candidate.telegramChatId || candidate.submittedByTelegramChatId || candidate.telegramUserId || candidate.submittedByTelegramUserId);
       }
       function renderRecipientList() {
         if (!filtered.length) return '<div class="empty">' + t('noRecipients') + '</div>';
@@ -1298,7 +1298,8 @@ function eligibleMessagingCandidates(candidates, candidateIds) {
       return false
     }
 
-    return Boolean(candidate.telegramChatId) && ['approved', 'verified'].includes(candidate.status)
+    const chatId = candidate.telegramChatId ?? candidate.submittedByTelegramChatId ?? candidate.telegramUserId ?? candidate.submittedByTelegramUserId
+    return Boolean(chatId) && ['approved', 'verified'].includes(candidate.status)
   })
 }
 
@@ -1308,7 +1309,8 @@ async function sendCandidateMessages(candidates, message, action) {
 
   for (const candidate of candidates) {
     try {
-      const result = await telegramProvider.sendMessage(candidate.telegramChatId, message)
+      const chatId = candidate.telegramChatId ?? candidate.submittedByTelegramChatId ?? candidate.telegramUserId ?? candidate.submittedByTelegramUserId
+      const result = await telegramProvider.sendMessage(chatId, message)
       sent.push({ candidateId: candidate.id, messageId: result.message_id })
       await recordAuditEvent({
         action,
@@ -1609,7 +1611,8 @@ export async function routeRequest(request, response) {
       return
     }
 
-    if (candidate.telegramChatId || candidate.submittedByTelegramChatId) {
+    const approvalChatId = candidate.telegramChatId ?? candidate.submittedByTelegramChatId ?? candidate.telegramUserId ?? candidate.submittedByTelegramUserId
+    if (approvalChatId) {
       const message = candidate.submissionMode === 'friend'
         ? nextStatus === 'approved'
           ? 'Анкета, которую вы отправили за друга, одобрена для внутренней базы талантов FACE Production.'
@@ -1618,7 +1621,7 @@ export async function routeRequest(request, response) {
           ? 'Ваш профиль FACE Production одобрен для внутренней кастинг-базы.'
           : 'Ваша заявка FACE Production рассмотрена и не одобрена на этом этапе.'
 
-      await telegramProvider.sendMessage(candidate.telegramChatId ?? candidate.submittedByTelegramChatId, message)
+      await telegramProvider.sendMessage(approvalChatId, message)
     }
 
     await syncTelegramAdminDecision(candidate, nextStatus, 'web_admin')
@@ -1730,10 +1733,10 @@ export async function routeRequest(request, response) {
       return
     }
 
-    const targetChatId = candidate.telegramChatId ?? candidate.submittedByTelegramChatId
+    const targetChatId = candidate.telegramChatId ?? candidate.submittedByTelegramChatId ?? candidate.telegramUserId ?? candidate.submittedByTelegramUserId
 
     if (!targetChatId) {
-      sendJson(response, 400, { error: 'Candidate or submitter does not have a Telegram chat ID' })
+      sendJson(response, 400, { error: 'У кандидата не найден Telegram ID для отправки сообщения' })
       return
     }
 
