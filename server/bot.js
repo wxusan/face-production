@@ -456,6 +456,9 @@ async function ensureBotReady({ deleteWebhook = false } = {}) {
   }
 }
 
+// Kick off getMe eagerly so it's done before the first request arrives
+ensureBotReady().catch((err) => console.error('ensureBotReady background init failed:', err.message))
+
 async function hydrateSession(userId) {
   if (sessions.has(userId)) {
     return
@@ -1211,12 +1214,14 @@ function multiKeyboard(session, groupName) {
 }
 
 async function askLanguage(chatId) {
-  await send(
-    chatId,
-    `${text.en.start}\n\n${text.en.askLanguage}`,
-    inlineKeyboard([languageOptions.map((option) => ({ text: option.label, callback_data: `lang:${option.code}` }))]),
-  )
-  await send(chatId, text.ru.menuText, userMenuKeyboard('ru'))
+  await Promise.all([
+    send(
+      chatId,
+      `${text.en.start}\n\n${text.en.askLanguage}`,
+      inlineKeyboard([languageOptions.map((option) => ({ text: option.label, callback_data: `lang:${option.code}` }))]),
+    ),
+    send(chatId, text.ru.menuText, userMenuKeyboard('ru')),
+  ])
 }
 
 async function askRegistrationMode(chatId, lang) {
@@ -1839,14 +1844,14 @@ async function handleTextMessage(chatId, from, message) {
 
   if (command === '/start' || command === '/help') {
     sessions.delete(userId)
-    await safeDelete(chatId, message.message_id)
+    safeDelete(chatId, message.message_id)
     await askLanguage(chatId)
     return
   }
 
   if (command === '/cancel') {
     sessions.delete(userId)
-    await safeDelete(chatId, message.message_id)
+    safeDelete(chatId, message.message_id)
     await send(chatId, text.en.cancel, removeKeyboard())
     return
   }
@@ -2026,14 +2031,15 @@ async function handleAdmin(chatId, from, command) {
 }
 
 export async function handleBotUpdate(update) {
-  await ensureBotReady()
-
   const query = update.callback_query
   const message = update.message
   const from = query?.from ?? message?.from
   const userId = from?.id ? String(from.id) : undefined
 
-  if (userId) {
+  // Skip DB session load for commands that reset state immediately anyway
+  const isStatelessCommand = !query && /^\/(start|help|cancel)\b/i.test(String(message?.text ?? '').trim())
+
+  if (userId && !isStatelessCommand) {
     await hydrateSession(userId)
   }
 
