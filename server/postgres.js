@@ -120,6 +120,58 @@ async function _runSchemaInit() {
     await client.query('CREATE INDEX IF NOT EXISTS candidates_telegram_user_idx ON candidates (telegram_user_id)')
     await client.query('CREATE INDEX IF NOT EXISTS candidates_city_idx ON candidates (city)')
     await client.query(`
+      CREATE TABLE IF NOT EXISTS profile_labels (
+        id text PRIMARY KEY,
+        name text NOT NULL,
+        normalized_name text NOT NULL UNIQUE,
+        color text,
+        created_by text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS candidate_profile_labels (
+        candidate_id text NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+        label_id text NOT NULL REFERENCES profile_labels(id) ON DELETE CASCADE,
+        assigned_by text,
+        assigned_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (candidate_id, label_id)
+      )
+    `)
+    await client.query('CREATE INDEX IF NOT EXISTS candidate_profile_labels_label_idx ON candidate_profile_labels (label_id)')
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS candidate_comments (
+        id text PRIMARY KEY,
+        candidate_id text NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+        body text NOT NULL,
+        author_id text NOT NULL,
+        author_name text NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `)
+    await client.query('CREATE INDEX IF NOT EXISTS candidate_comments_candidate_idx ON candidate_comments (candidate_id, created_at)')
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS custom_taxonomy_values (
+        id text PRIMARY KEY,
+        field text NOT NULL CHECK (
+          field IN ('appearance', 'languageSkills', 'performanceTalents', 'physicalSkills', 'sportsTalents')
+        ),
+        value text NOT NULL,
+        normalized_value text NOT NULL,
+        status text NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending', 'approved', 'merged', 'removed')),
+        merged_into_value text,
+        created_by text,
+        updated_by text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (field, normalized_value)
+      )
+    `)
+    await client.query('CREATE INDEX IF NOT EXISTS custom_taxonomy_values_status_idx ON custom_taxonomy_values (status, field)')
+    await client.query(`
       CREATE TABLE IF NOT EXISTS audit_events (
         id bigserial PRIMARY KEY,
         action text NOT NULL,

@@ -17,7 +17,24 @@ import {
   updateCandidateMetadata,
   updateCandidateStatus,
 } from './candidateRepository.js'
-import { requireAdminWebToken } from './security.js'
+import {
+  assignCandidateLabel,
+  createCandidateComment,
+  createProfileLabel,
+  deleteCandidateComment,
+  deleteProfileLabel,
+  enrichCandidatesForAdmin,
+  listCustomTaxonomyValues,
+  listProfileLabels,
+  moderateCustomTaxonomyValue,
+  profileChanges,
+  registerCandidateCustomValues,
+  removeCandidateLabel,
+  renameProfileLabel,
+  sanitizeCandidateProfilePatch,
+  updateCandidateComment,
+} from './profileManagementRepository.js'
+import { requireAdminWebToken, requireSuperAdminWebToken } from './security.js'
 import { talentTaxonomy } from './taxonomy.js'
 import { telegramProvider } from './telegramProvider.js'
 import {
@@ -79,6 +96,14 @@ function sendJson(response, statusCode, body) {
     'x-content-type-options': 'nosniff',
   })
   response.end(JSON.stringify(body, null, 2))
+}
+
+function adminAuditFields(admin) {
+  return {
+    actor: admin.id,
+    actorName: admin.name,
+    actorRole: admin.role,
+  }
 }
 
 function hasValidTelegramWebhookSecret(request) {
@@ -514,6 +539,24 @@ function candidateAdminHtml() {
     .ratingControls { display: grid; grid-template-columns: minmax(0, 1fr) 76px; gap: 8px; align-items: center; }
     .ratingControls input[type="range"] { width: 100%; }
     .ratingValue { min-height: 34px; display: grid; place-items: center; border-radius: 8px; background: #f4f7fb; font-weight: 900; }
+    .profileSection { display: grid; gap: 10px; padding: 12px; border: 1px solid #d7e0ec; border-radius: 8px; background: #fff; }
+    .profileSection h4 { margin: 0; color: #152033; }
+    .profileSection input, .profileSection select { width: 100%; min-height: 38px; border: 1px solid #d7e0ec; border-radius: 8px; padding: 0 10px; background: #fff; color: #152033; }
+    .editGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+    .editGrid label { display: grid; gap: 5px; color: #63748d; font-size: 12px; font-weight: 850; }
+    .editGrid .wide { grid-column: 1 / -1; }
+    .labelList { display: flex; flex-wrap: wrap; gap: 7px; }
+    .labelPill { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 9px; border-radius: 999px; background: #e0f2fe; color: #075985; font-size: 12px; font-weight: 850; }
+    .labelPill button { border: 0; background: transparent; color: inherit; cursor: pointer; font-weight: 900; }
+    .inlineForm { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+    .commentList { display: grid; gap: 8px; }
+    .commentCard { display: grid; gap: 6px; padding: 10px; border-radius: 8px; background: #f8fafc; border: 1px solid #e2e8f0; }
+    .commentCard p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .commentMeta { color: #63748d; font-size: 12px; }
+    .moderationList { display: grid; gap: 8px; }
+    .moderationItem { display: grid; gap: 7px; padding: 10px; border-radius: 8px; background: #fffbeb; border: 1px solid #fde68a; }
+    .moderationItem.approvedValue { background: #f0fdf4; border-color: #bbf7d0; }
+    .miniButton { min-height: 30px; border: 0; border-radius: 7px; padding: 0 9px; background: #e8edf5; color: #152033; font-size: 12px; font-weight: 850; cursor: pointer; }
     .postPage { display: grid; gap: 14px; }
     .postPanel, .postCard { border: 1px solid #d7e0ec; border-radius: 8px; background: #fff; box-shadow: rgba(15, 23, 42, .04) 0 10px 26px; }
     .postPanel { display: grid; gap: 12px; padding: 16px; }
@@ -544,7 +587,7 @@ function candidateAdminHtml() {
     .loginCard .langBtn.active { border-color: #1b6ca8; background: #1b6ca8; color: #fff; }
     @media (max-width: 1180px) { .filterGrid, .postGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .rangeGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     @media (max-width: 900px) { .postGrid { grid-template-columns: 1fr; } .sectionHeader { display: grid; } .statRow { justify-content: flex-start; } }
-    @media (max-width: 760px) { .app { grid-template-columns: 1fr; } .sidebar { padding: 16px; } .filterGrid, .rangeGrid, .facts, .media, .composerDates { grid-template-columns: 1fr; } .workspace { padding: 18px; } .topbar { display: grid; } .recipientItem { grid-template-columns: 24px minmax(0, 1fr); } .recipientItem .telegramBadge { grid-column: 2; justify-self: start; } }
+    @media (max-width: 760px) { .app { grid-template-columns: 1fr; } .sidebar { padding: 16px; } .filterGrid, .rangeGrid, .facts, .media, .composerDates, .editGrid { grid-template-columns: 1fr; } .editGrid .wide { grid-column: auto; } .workspace { padding: 18px; } .topbar { display: grid; } .recipientItem { grid-template-columns: 24px minmax(0, 1fr); } .recipientItem .telegramBadge { grid-column: 2; justify-self: start; } }
   </style>
 </head>
 <body>
@@ -554,11 +597,15 @@ function candidateAdminHtml() {
       var root = document.getElementById('root');
       var authenticated = false;
       var candidates = [];
+      var customValues = [];
+      var labels = [];
+      var currentAdmin = null;
       var activePage = 'pending';
       var filtered = [];
       var selectedIds = [];
       var selectionMode = 'auto';
       var selectedId = '';
+      var editingProfileId = '';
       var draftMessages = {};
       var draftRatings = {};
       var deliveryOperations = { bulk: '', casting: '', candidates: {} };
@@ -584,6 +631,7 @@ function candidateAdminHtml() {
         ageMin: '', ageMax: '', heightMin: '', heightMax: '', weightMin: '', weightMax: '',
         createdFrom: '', createdTo: '', updatedFrom: '', updatedTo: '',
         performance: [], sports: [], physical: [], languages: [], appearance: [],
+        customValues: [], labels: [],
         media: {}
       };
       var lang = localStorage.getItem('face-admin-lang') || 'ru';
@@ -626,6 +674,12 @@ function candidateAdminHtml() {
           telegramCandidate: 'Telegram кандидата', title: 'Консоль MVP', type: 'Тип анкеты',
           updatedAt: 'Обновлен', updatedFrom: 'Обновлен от', updatedTo: 'Обновлен до',
           weight: 'Вес', weightFrom: 'Вес от', weightTo: 'Вес до',
+          addComment: 'Добавить комментарий', addLabel: 'Добавить метку', adminLabels: 'Метки',
+          approveCustom: 'Сделать официальным', cancel: 'Отмена', comments: 'Внутренние комментарии',
+          customValues: 'Пользовательские значения', deleteAction: 'Удалить', editComment: 'Изменить',
+          editProfile: 'Редактировать профиль', mergeCustom: 'Объединить', newComment: 'Внутренняя заметка',
+          newLabel: 'Новая метка', removeLabel: 'Убрать', renameCustom: 'Переименовать',
+          saveProfile: 'Сохранить профиль', profileDetails: 'Данные профиля',
         },
         uz: {
           adminCode: 'Admin kodi', age: 'Yosh', ageFrom: 'Yosh dan', ageTo: 'Yosh gacha',
@@ -665,6 +719,12 @@ function candidateAdminHtml() {
           sports: 'Sport', status: 'Holat', telegramCandidate: 'Nomzod Telegram', title: 'MVP konsoli',
           type: 'Ariza turi', updatedAt: 'Yangilangan', updatedFrom: "Yangilangan dan",
           updatedTo: "Yangilangan gacha", weight: 'Vazn', weightFrom: 'Vazn dan', weightTo: 'Vazn gacha',
+          addComment: "Izoh qo‘shish", addLabel: "Yorliq qo‘shish", adminLabels: 'Yorliqlar',
+          approveCustom: 'Rasmiy variant qilish', cancel: 'Bekor qilish', comments: 'Ichki izohlar',
+          customValues: 'Maxsus qiymatlar', deleteAction: "O‘chirish", editComment: 'Tahrirlash',
+          editProfile: 'Profilni tahrirlash', mergeCustom: 'Birlashtirish', newComment: 'Ichki izoh',
+          newLabel: 'Yangi yorliq', removeLabel: 'Olib tashlash', renameCustom: 'Nomini o‘zgartirish',
+          saveProfile: 'Profilni saqlash', profileDetails: "Profil ma'lumotlari",
         },
         en: {
           adminCode: 'Admin code', age: 'Age', ageFrom: 'Age from', ageTo: 'Age to',
@@ -704,6 +764,12 @@ function candidateAdminHtml() {
           telegramCandidate: 'Candidate Telegram', title: 'MVP Console', type: 'Application type',
           updatedAt: 'Updated', updatedFrom: 'Updated from', updatedTo: 'Updated to',
           weight: 'Weight', weightFrom: 'Weight from', weightTo: 'Weight to',
+          addComment: 'Add comment', addLabel: 'Add label', adminLabels: 'Labels',
+          approveCustom: 'Make official', cancel: 'Cancel', comments: 'Internal comments',
+          customValues: 'Custom values', deleteAction: 'Delete', editComment: 'Edit',
+          editProfile: 'Edit profile', mergeCustom: 'Merge', newComment: 'Internal note',
+          newLabel: 'New label', removeLabel: 'Remove', renameCustom: 'Rename',
+          saveProfile: 'Save profile', profileDetails: 'Profile details',
         }
       };
       function t(key) { return (translations[lang] || translations.ru)[key] || key; }
@@ -816,12 +882,16 @@ function candidateAdminHtml() {
         var set = new Set();
         if (taxonomy[field]) {
           taxonomy[field].forEach(function (option) { set.add(option.code); });
+          customValues.filter(function (item) {
+            return item.field === field && item.status === 'approved';
+          }).forEach(function (item) { set.add(item.value); });
+        } else {
+          candidates.forEach(function (candidate) {
+            var value = candidate[field];
+            if (Array.isArray(value)) value.forEach(function (item) { if (item) set.add(canonicalTalentValue(item)); });
+            else if (value) set.add(canonicalTalentValue(value));
+          });
         }
-        candidates.forEach(function (candidate) {
-          var value = candidate[field];
-          if (Array.isArray(value)) value.forEach(function (item) { if (item) set.add(canonicalTalentValue(item)); });
-          else if (value) set.add(canonicalTalentValue(value));
-        });
         return Array.from(set)
           .filter(Boolean)
           .sort(function (a, b) { return String(talentLabel(a)).localeCompare(String(talentLabel(b))); })
@@ -899,6 +969,23 @@ function candidateAdminHtml() {
         if (key === 'portraitPhotoPath') return Boolean(candidate.portraitPhotoPath || candidate.photoPath);
         return Boolean(candidate[key]);
       }
+      function candidateHasLabel(candidate, labelId) {
+        return (candidate.adminLabels || []).some(function (label) { return label.id === labelId; });
+      }
+      function candidateHasCustomValue(candidate, customValueId) {
+        var customValue = customValues.find(function (item) { return item.id === customValueId; });
+        if (!customValue) return false;
+        return (candidate[customValue.field] || []).some(function (value) {
+          return String(value).trim().toLowerCase() === String(customValue.value).trim().toLowerCase();
+        });
+      }
+      function activeCustomValueOptions() {
+        return customValues.filter(function (item) {
+          return item.status === 'pending' || item.status === 'approved';
+        }).map(function (item) {
+          return { value: item.id, label: item.value };
+        });
+      }
       function mediaFilterButtons() {
         var active = Object.keys(filters.media).filter(function (key) { return filters.media[key]; });
         var mf = getMediaFields();
@@ -913,7 +1000,10 @@ function candidateAdminHtml() {
         var baseCandidates = pageBaseCandidates();
 
         if (activePage !== 'candidates') {
-          filtered = baseCandidates.sort(function (a, b) {
+          filtered = baseCandidates.filter(function (candidate) {
+            if (activePage !== 'pending' || !filters.labels.length) return true;
+            return filters.labels.some(function (labelId) { return candidateHasLabel(candidate, labelId); });
+          }).sort(function (a, b) {
             return ratingValue(b) - ratingValue(a) || String(a.name || '').localeCompare(String(b.name || ''));
           });
         } else {
@@ -937,6 +1027,8 @@ function candidateAdminHtml() {
             if (!matchesAny(candidate.physicalSkills, filters.physical)) return false;
             if (!matchesAny(candidate.languageSkills, filters.languages)) return false;
             if (!matchesAny(candidate.appearance, filters.appearance)) return false;
+            if (filters.labels.length && !filters.labels.some(function (labelId) { return candidateHasLabel(candidate, labelId); })) return false;
+            if (filters.customValues.length && !filters.customValues.some(function (customValueId) { return candidateHasCustomValue(candidate, customValueId); })) return false;
             for (var key in filters.media) {
               if (filters.media[key] && !hasCandidateMedia(candidate, key)) return false;
             }
@@ -971,6 +1063,9 @@ function candidateAdminHtml() {
           captureDrafts();
           var data = await api('/api/candidates');
           candidates = data.candidates || [];
+          customValues = data.customValues || [];
+          labels = data.labels || [];
+          currentAdmin = data.admin || null;
           authenticated = true;
           applyFilters();
           renderApp();
@@ -1042,6 +1137,7 @@ function candidateAdminHtml() {
           choiceGroup('city', t('city'), cityOptions, filters.city) +
           choiceGroup('gender', t('gender'), genderOptions, filters.gender) +
           choiceGroup('source', t('source'), sourceOptions, filters.source) +
+          choiceGroup('labels', t('adminLabels'), labels.map(function (label) { return { value: label.id, label: label.name }; }), filters.labels) +
           '</div>';
         var additionalBody = '<div class="rangeGrid">' +
           '<label>' + t('ageFrom') + '<input id="ageMin" type="number" value="' + esc(filters.ageMin) + '"></label><label>' + t('ageTo') + '<input id="ageMax" type="number" value="' + esc(filters.ageMax) + '"></label>' +
@@ -1056,6 +1152,7 @@ function candidateAdminHtml() {
           choiceGroup('physical', t('physical'), optionValues('physicalSkills'), filters.physical) +
           choiceGroup('languages', t('languages'), optionValues('languageSkills'), filters.languages) +
           choiceGroup('appearance', t('appearance'), optionValues('appearance'), filters.appearance) +
+          choiceGroup('customValues', t('customValues'), activeCustomValueOptions(), filters.customValues) +
           '</div>';
         return '<section class="filters"><input class="search" id="q" placeholder="' + t('search') + '" value="' + esc(filters.q) + '">' +
           renderFilterSection('main', t('filter_main'), mainBody) +
@@ -1063,6 +1160,12 @@ function candidateAdminHtml() {
           renderFilterSection('talents', t('filter_talents'), talentsBody) +
           renderFilterSection('media', t('filter_media'), mediaFilterButtons()) +
           '<div class="actions"><button class="secondary" id="clearFilters">' + t('clearFilters') + '</button><strong>' + t('found') + ': ' + filtered.length + ' / ' + pageTotalCount() + '</strong><span class="muted">' + t('resultNote_others') + '</span></div></section>';
+      }
+      function renderApplicationLabelFilter() {
+        if (!labels.length) return '';
+        return '<section class="filters">' +
+          choiceGroup('labels', t('adminLabels'), labels.map(function (label) { return { value: label.id, label: label.name }; }), filters.labels) +
+          '<div class="actions"><button class="secondary" id="clearFilters">' + t('clearFilters') + '</button><strong>' + t('found') + ': ' + filtered.length + ' / ' + pageTotalCount() + '</strong></div></section>';
       }
       function renderFilterSection(id, title, body) {
         return '<div class="filterSection"><button type="button" class="filterToggle" data-filter-toggle="' + id + '">' + esc(title) + '<span>' + (filterSections[id] ? t('hide') : t('show')) + '</span></button>' +
@@ -1133,7 +1236,7 @@ function candidateAdminHtml() {
         var clearMedia = document.getElementById('clearMediaFilters');
         if (clearMedia) clearMedia.onclick = function () { filters.media = {}; selectionMode = 'auto'; applyFilters(); renderApp(); };
         document.getElementById('clearFilters').onclick = function () {
-          filters = { q: '', status: [], city: [], gender: [], source: [], ageMin: '', ageMax: '', heightMin: '', heightMax: '', weightMin: '', weightMax: '', createdFrom: '', createdTo: '', updatedFrom: '', updatedTo: '', performance: [], sports: [], physical: [], languages: [], appearance: [], media: {} };
+          filters = { q: '', status: [], city: [], gender: [], source: [], ageMin: '', ageMax: '', heightMin: '', heightMax: '', weightMin: '', weightMax: '', createdFrom: '', createdTo: '', updatedFrom: '', updatedTo: '', performance: [], sports: [], physical: [], languages: [], appearance: [], customValues: [], labels: [], media: {} };
           selectionMode = 'auto';
           applyFilters();
           renderApp();
@@ -1165,6 +1268,72 @@ function candidateAdminHtml() {
         if (!confirmation) return '';
         return '<section class="notice"><p>' + t('consentPending') + '</p><button class="secondary" id="confirmConsent" data-confirmation="' + confirmation + '">' + label + '</button></section>';
       }
+      function renderProfileEditor(candidate) {
+        function input(field, label, type, value, wide) {
+          return '<label class="' + (wide ? 'wide' : '') + '">' + esc(label) + '<input id="edit-' + field + '" type="' + (type || 'text') + '" value="' + esc(value == null ? '' : value) + '"></label>';
+        }
+        function listInput(field, label, value) {
+          return input(field, label, 'text', (value || []).map(talentLabel).join(', '), true);
+        }
+        return '<section class="profileSection"><h4>' + t('editProfile') + '</h4><div class="editGrid">' +
+          input('name', t('candidate'), 'text', candidate.name) +
+          input('phone', t('phone'), 'text', candidate.phone) +
+          input('age', t('age'), 'number', candidate.age) +
+          input('city', t('city'), 'text', candidate.city) +
+          input('gender', t('gender'), 'text', candidate.gender) +
+          input('height', t('height'), 'number', candidate.height) +
+          input('weight', t('weight'), 'number', candidate.weight) +
+          listInput('performanceTalents', t('performance'), candidate.performanceTalents) +
+          listInput('sportsTalents', t('sports'), candidate.sportsTalents) +
+          listInput('physicalSkills', t('physical'), candidate.physicalSkills) +
+          listInput('languageSkills', t('languages'), candidate.languageSkills) +
+          listInput('appearance', t('appearance'), candidate.appearance) +
+          '</div><p class="muted">ID, Telegram ID, creation date and audit history cannot be edited.</p>' +
+          '<div class="actions"><button class="primary" id="saveProfileEdit">' + t('saveProfile') + '</button><button class="secondary" id="cancelProfileEdit">' + t('cancel') + '</button><span class="muted" id="profileEditResult"></span></div></section>';
+      }
+      function renderLabelsSection(candidate) {
+        var assigned = candidate.adminLabels || [];
+        var available = labels.filter(function (label) {
+          return !assigned.some(function (item) { return item.id === label.id; });
+        });
+        var pills = assigned.length
+          ? assigned.map(function (label) {
+              return '<span class="labelPill">' + esc(label.name) + '<button type="button" data-remove-label="' + esc(label.id) + '" title="' + t('removeLabel') + '">×</button></span>';
+            }).join('')
+          : '<span class="muted">—</span>';
+        var options = available.map(function (label) {
+          return '<option value="' + esc(label.id) + '">' + esc(label.name) + '</option>';
+        }).join('');
+        return '<section class="profileSection"><h4>' + t('adminLabels') + '</h4><div class="labelList">' + pills + '</div>' +
+          (available.length ? '<div class="inlineForm"><select id="labelSelect">' + options + '</select><button class="secondary" id="assignLabel">' + t('addLabel') + '</button></div>' : '') +
+          '<div class="inlineForm"><input id="newLabelName" maxlength="60" placeholder="' + t('newLabel') + '"><button class="secondary" id="createLabel">' + t('addLabel') + '</button></div></section>';
+      }
+      function renderCommentsSection(candidate) {
+        var comments = candidate.adminComments || [];
+        var content = comments.length ? comments.map(function (comment) {
+          var actions = comment.canManage
+            ? '<div class="actions"><button class="miniButton" data-edit-comment="' + esc(comment.id) + '">' + t('editComment') + '</button><button class="miniButton" data-delete-comment="' + esc(comment.id) + '">' + t('deleteAction') + '</button></div>'
+            : '';
+          return '<article class="commentCard"><div class="commentMeta">' + esc(comment.authorName) + ' · ' + esc(new Date(comment.createdAt).toLocaleString()) + '</div><p>' + esc(comment.body) + '</p>' + actions + '</article>';
+        }).join('') : '<span class="muted">—</span>';
+        return '<section class="profileSection"><h4>' + t('comments') + '</h4><div class="commentList">' + content + '</div><textarea id="newCommentBody" maxlength="4000" placeholder="' + t('newComment') + '"></textarea><div class="actions"><button class="secondary" id="addComment">' + t('addComment') + '</button><span class="muted" id="commentResult"></span></div></section>';
+      }
+      function renderCustomModeration(candidate) {
+        var items = customValues.filter(function (customValue) {
+          if (customValue.status === 'removed' || customValue.status === 'merged') return false;
+          return (candidate[customValue.field] || []).some(function (value) {
+            return String(value).trim().toLowerCase() === String(customValue.value).trim().toLowerCase();
+          });
+        });
+        if (!items.length) return '';
+        return '<section class="profileSection"><h4>' + t('customValues') + '</h4><div class="moderationList">' + items.map(function (item) {
+          return '<div class="moderationItem ' + (item.status === 'approved' ? 'approvedValue' : '') + '"><div><strong>' + esc(item.value) + '</strong><div class="commentMeta">' + esc(t(item.field === 'performanceTalents' ? 'performance' : item.field === 'sportsTalents' ? 'sports' : item.field === 'physicalSkills' ? 'physical' : item.field === 'languageSkills' ? 'languages' : 'appearance')) + ' · ' + esc(item.status) + '</div></div><div class="actions">' +
+            (item.status !== 'approved' ? '<button class="miniButton" data-custom-action="approve" data-custom-id="' + esc(item.id) + '">' + t('approveCustom') + '</button>' : '') +
+            '<button class="miniButton" data-custom-action="rename" data-custom-id="' + esc(item.id) + '">' + t('renameCustom') + '</button>' +
+            '<button class="miniButton" data-custom-action="merge" data-custom-id="' + esc(item.id) + '">' + t('mergeCustom') + '</button>' +
+            '<button class="miniButton" data-custom-action="remove" data-custom-id="' + esc(item.id) + '">' + t('deleteAction') + '</button></div></div>';
+        }).join('') + '</div></section>';
+      }
       function renderDetail() {
         var candidate = filtered.find(function (item) { return item.id === selectedId; });
         if (!candidate) return '';
@@ -1175,17 +1344,22 @@ function candidateAdminHtml() {
           if (item[1] === 'introVideo') return '<figure class="videoTile"><video controls src="' + mediaUrl(candidate.id, item[1]) + '"></video><figcaption>' + esc(item[2]) + '</figcaption></figure>';
           return '<figure><img src="' + mediaUrl(candidate.id, item[1]) + '" alt="' + esc(item[2]) + '"><figcaption>' + esc(item[2]) + '</figcaption></figure>';
         }).join('');
+        var facts = '<section class="profileSection"><h4>' + t('profileDetails') + '</h4><div class="facts">' +
+          fact(t('status'), statusLabel(candidate.status)) + fact(t('type'), candidate.submissionMode === 'friend' ? t('forFriend') : t('personal')) + fact(t('filledBy'), submitterLabel(candidate) || '-') + fact(t('rating'), ratingValue(candidate).toFixed(2) + ' ' + starText(ratingValue(candidate))) + fact(t('phone'), candidate.phone) + fact(t('telegramCandidate'), candidate.telegramUsername ? '@' + candidate.telegramUsername : candidate.telegramUserId) + fact(t('gender'), candidate.gender) + fact(t('height'), candidate.height) + fact(t('weight'), candidate.weight) + fact(t('appearance'), displayTalentList(candidate.appearance)) + fact(t('performance'), displayTalentList(candidate.performanceTalents)) + fact(t('sports'), displayTalentList(candidate.sportsTalents)) + fact(t('physical'), displayTalentList(candidate.physicalSkills)) + fact(t('languages'), displayTalentList(candidate.languageSkills)) + fact(t('createdAt'), candidate.createdAt) + fact(t('updatedAt'), candidate.updatedAt) +
+          '</div></section>';
         return '<div class="drawerOverlay" id="detailDrawer"><aside class="detail"><div class="drawerTop"><button class="iconButton" id="closeDetail" title="' + t('hide') + '">×</button></div><div class="profileHead">' +
           (portrait ? '<img class="photo" src="' + mediaUrl(candidate.id, 'portraitPhoto') + '" alt="' + t('photo') + '">' : '<div class="avatar">' + esc(String(candidate.name || '?').slice(0, 1)) + '</div>') +
           '<div><p class="muted">' + esc(candidate.id) + '</p><h3>' + esc(candidate.name || '-') + '</h3><p class="muted">' + esc(candidate.age || '-') + ' · ' + esc(candidate.city || '-') + '</p></div></div>' +
-          (media ? '<section class="media">' + media + '</section>' : '<p class="notice">' + t('noMedia') + '</p>') +
-          '<section class="facts">' +
-          fact(t('status'), statusLabel(candidate.status)) + fact(t('type'), candidate.submissionMode === 'friend' ? t('forFriend') : t('personal')) + fact(t('filledBy'), submitterLabel(candidate) || '-') + fact(t('rating'), ratingValue(candidate).toFixed(2) + ' ' + starText(ratingValue(candidate))) + fact(t('phone'), candidate.phone) + fact(t('telegramCandidate'), candidate.telegramUsername ? '@' + candidate.telegramUsername : candidate.telegramUserId) + fact(t('gender'), candidate.gender) + fact(t('height'), candidate.height) + fact(t('weight'), candidate.weight) + fact(t('appearance'), displayTalentList(candidate.appearance)) + fact(t('performance'), displayTalentList(candidate.performanceTalents)) + fact(t('sports'), displayTalentList(candidate.sportsTalents)) + fact(t('physical'), displayTalentList(candidate.physicalSkills)) + fact(t('languages'), displayTalentList(candidate.languageSkills)) + fact(t('createdAt'), candidate.createdAt) + fact(t('updatedAt'), candidate.updatedAt) +
-          '</section>' +
+          (editingProfileId === candidate.id ? renderProfileEditor(candidate) : facts) +
           renderConsentVerification(candidate) +
-          (isPendingPage ? renderRatingControl(candidate) : '') +
+          (media ? '<section class="media">' + media + '</section>' : '<p class="notice">' + t('noMedia') + '</p>') +
+          renderRatingControl(candidate) +
+          renderLabelsSection(candidate) +
+          renderCommentsSection(candidate) +
+          renderCustomModeration(candidate) +
           '<div><p class="filterLabel">' + t('messageTelegram') + '</p><textarea id="singleText" placeholder="' + t('messagePlaceholder') + '">' + esc(draftMessages[candidate.id] || '') + '</textarea><div class="actions"><button class="primary" id="sendSingle">' + t('send') + '</button><span class="muted" id="singleResult"></span></div></div><div class="actions">' +
           (isPendingPage ? '<button class="primary" id="approve">' + t('approve') + '</button><button class="danger" id="reject">' + t('reject') + '</button>' : '') +
+          (editingProfileId === candidate.id ? '' : '<button class="secondary" id="editProfile">' + t('editProfile') + '</button>') +
           '<button class="secondary" id="openProfile">' + t('openProfile') + '</button></div></aside></div>';
       }
       function renderRatingControl(candidate) {
@@ -1194,7 +1368,7 @@ function candidateAdminHtml() {
       }
       function bindTableAndDetail() {
         document.querySelectorAll('[data-id]').forEach(function (row) {
-          row.onclick = function () { selectedId = row.dataset.id; renderApp(); };
+          row.onclick = function () { selectedId = row.dataset.id; editingProfileId = ''; renderApp(); };
         });
         var candidate = filtered.find(function (item) { return item.id === selectedId; });
         if (!candidate) return;
@@ -1206,6 +1380,154 @@ function candidateAdminHtml() {
         var ratingInput = document.getElementById('ratingInput');
         var saveRatingButton = document.getElementById('saveRating');
         var confirmConsentButton = document.getElementById('confirmConsent');
+        var editProfileButton = document.getElementById('editProfile');
+        var saveProfileEdit = document.getElementById('saveProfileEdit');
+        var cancelProfileEdit = document.getElementById('cancelProfileEdit');
+        var assignLabelButton = document.getElementById('assignLabel');
+        var createLabelButton = document.getElementById('createLabel');
+        var addCommentButton = document.getElementById('addComment');
+        if (editProfileButton) editProfileButton.onclick = function () {
+          editingProfileId = candidate.id;
+          renderApp();
+        };
+        if (cancelProfileEdit) cancelProfileEdit.onclick = function () {
+          editingProfileId = '';
+          renderApp();
+        };
+        if (saveProfileEdit) saveProfileEdit.onclick = async function () {
+          var output = document.getElementById('profileEditResult');
+          function fieldValue(field) {
+            return document.getElementById('edit-' + field).value.trim();
+          }
+          function listValue(field) {
+            return fieldValue(field).split(',').map(function (value) { return value.trim(); }).filter(Boolean);
+          }
+          saveProfileEdit.disabled = true;
+          try {
+            var profileBody = {
+              appearance: listValue('appearance'),
+              languageSkills: listValue('languageSkills'),
+              performanceTalents: listValue('performanceTalents'),
+              physicalSkills: listValue('physicalSkills'),
+              sportsTalents: listValue('sportsTalents')
+            };
+            ['name', 'phone', 'city', 'gender'].forEach(function (field) {
+              var value = fieldValue(field);
+              if (value) profileBody[field] = value;
+            });
+            ['age', 'height', 'weight'].forEach(function (field) {
+              var value = fieldValue(field);
+              if (value) profileBody[field] = Number(value);
+            });
+            await postJson('/api/candidates/' + encodeURIComponent(candidate.id) + '/profile', profileBody);
+            editingProfileId = '';
+            await load();
+          } catch (error) {
+            saveProfileEdit.disabled = false;
+            output.textContent = error.message;
+          }
+        };
+        if (assignLabelButton) assignLabelButton.onclick = async function () {
+          assignLabelButton.disabled = true;
+          try {
+            await postJson('/api/candidates/' + encodeURIComponent(candidate.id) + '/labels', {
+              action: 'add',
+              labelId: document.getElementById('labelSelect').value
+            });
+            await load();
+          } catch (error) {
+            assignLabelButton.disabled = false;
+            window.alert(error.message);
+          }
+        };
+        if (createLabelButton) createLabelButton.onclick = async function () {
+          var value = document.getElementById('newLabelName').value.trim();
+          if (!value) return;
+          createLabelButton.disabled = true;
+          try {
+            await postJson('/api/candidates/' + encodeURIComponent(candidate.id) + '/labels', {
+              action: 'add',
+              name: value
+            });
+            await load();
+          } catch (error) {
+            createLabelButton.disabled = false;
+            window.alert(error.message);
+          }
+        };
+        document.querySelectorAll('[data-remove-label]').forEach(function (button) {
+          button.onclick = async function () {
+            button.disabled = true;
+            try {
+              await postJson('/api/candidates/' + encodeURIComponent(candidate.id) + '/labels', {
+                action: 'remove',
+                labelId: button.dataset.removeLabel
+              });
+              await load();
+            } catch (error) {
+              button.disabled = false;
+              window.alert(error.message);
+            }
+          };
+        });
+        if (addCommentButton) addCommentButton.onclick = async function () {
+          var output = document.getElementById('commentResult');
+          var value = document.getElementById('newCommentBody').value.trim();
+          if (!value) return;
+          addCommentButton.disabled = true;
+          try {
+            await postJson('/api/candidates/' + encodeURIComponent(candidate.id) + '/comments', { body: value });
+            await load();
+          } catch (error) {
+            addCommentButton.disabled = false;
+            output.textContent = error.message;
+          }
+        };
+        document.querySelectorAll('[data-edit-comment]').forEach(function (button) {
+          button.onclick = async function () {
+            var comment = (candidate.adminComments || []).find(function (item) { return item.id === button.dataset.editComment; });
+            var value = window.prompt(t('editComment'), comment ? comment.body : '');
+            if (value == null || !value.trim()) return;
+            await postJson('/api/comments/' + encodeURIComponent(button.dataset.editComment), {
+              action: 'edit',
+              body: value.trim()
+            });
+            await load();
+          };
+        });
+        document.querySelectorAll('[data-delete-comment]').forEach(function (button) {
+          button.onclick = async function () {
+            if (!window.confirm(t('deleteAction') + '?')) return;
+            await postJson('/api/comments/' + encodeURIComponent(button.dataset.deleteComment), { action: 'delete' });
+            await load();
+          };
+        });
+        document.querySelectorAll('[data-custom-action]').forEach(function (button) {
+          button.onclick = async function () {
+            var action = button.dataset.customAction;
+            var body = { action: action };
+            var item = customValues.find(function (value) { return value.id === button.dataset.customId; });
+            if (action === 'rename') {
+              var renamed = window.prompt(t('renameCustom'), item ? item.value : '');
+              if (renamed == null || !renamed.trim()) return;
+              body.value = renamed.trim();
+            }
+            if (action === 'merge') {
+              var merged = window.prompt(t('mergeCustom'), '');
+              if (merged == null || !merged.trim()) return;
+              body.targetValue = merged.trim();
+            }
+            if (action === 'remove' && !window.confirm(t('deleteAction') + '?')) return;
+            button.disabled = true;
+            try {
+              await postJson('/api/custom-values/' + encodeURIComponent(button.dataset.customId), body);
+              await load();
+            } catch (error) {
+              button.disabled = false;
+              window.alert(error.message);
+            }
+          };
+        });
         if (confirmConsentButton) confirmConsentButton.onclick = async function () {
           confirmConsentButton.disabled = true;
           try {
@@ -1257,10 +1579,11 @@ function candidateAdminHtml() {
             window.alert(error.message);
           }
         };
-        if (closeDetail) closeDetail.onclick = function () { selectedId = ''; renderApp(); };
+        if (closeDetail) closeDetail.onclick = function () { selectedId = ''; editingProfileId = ''; renderApp(); };
         if (detailDrawer) detailDrawer.onclick = function (event) {
           if (event.target === detailDrawer) {
             selectedId = '';
+            editingProfileId = '';
             renderApp();
           }
         };
@@ -1379,6 +1702,7 @@ function candidateAdminHtml() {
           button.onclick = function () {
             activePage = button.dataset.page;
             selectedId = '';
+            editingProfileId = '';
             selectionMode = 'auto';
             applyFilters();
             renderApp();
@@ -1395,7 +1719,7 @@ function candidateAdminHtml() {
         var pageTitle = isPosts ? t('postsPage') : isPending ? t('pendingPage') : t('candidatesPage');
         var body = isPosts
           ? renderPostsPage()
-          : (isCandidates ? renderFilters() : '') + '<section class="layout">' + renderTable() + renderDetail() + '</section>';
+          : (isCandidates ? renderFilters() : renderApplicationLabelFilter()) + '<section class="layout">' + renderTable() + renderDetail() + '</section>';
         var exportAction = isCandidates ? '<button class="secondary" id="export">' + t('export') + '</button>' : '';
         var langBtns = ['ru','uz','en'].map(function(l) { return '<button type="button" class="langBtn' + (lang === l ? ' active' : '') + '" data-lang="' + l + '">' + l.toUpperCase() + '</button>'; }).join('');
         root.innerHTML = '<main class="app"><aside class="sidebar"><div class="brand">' + (logoDataUri ? '<img class="logoMark" src="' + logoDataUri + '" alt="FACE Production">' : '<div class="mark">FP</div>') + '<div><strong>FACE Production</strong><p class="muted">' + t('brand') + '</p></div></div><button class="nav ' + (isPending ? 'active' : '') + '" data-page="pending">' + t('pendingPage') + '</button><button class="nav ' + (isCandidates ? 'active' : '') + '" data-page="candidates">' + t('candidatesPage') + '</button><button class="nav ' + (isPosts ? 'active' : '') + '" data-page="posts">' + t('postsPage') + '</button><div class="langRow">' + langBtns + '</div></aside><section class="workspace"><header class="topbar"><div><p class="muted">' + t('title') + '</p><h2>' + pageTitle + '</h2></div><div class="actions"><button class="secondary" id="refresh">' + t('refresh') + '</button>' + exportAction + '<button class="secondary" id="logout">' + t('logout') + '</button></div></header>' + body + '</section></main>';
@@ -1403,7 +1727,7 @@ function candidateAdminHtml() {
         if (isPosts) {
           bindMessagingPanel();
         } else {
-          if (isCandidates) bindFilters();
+          if (isCandidates || (isPending && labels.length)) bindFilters();
           bindTableAndDetail();
         }
         document.getElementById('refresh').onclick = load;
@@ -1620,7 +1944,14 @@ export async function routeRequest(request, response) {
     }
 
     setAdminSession(response)
-    sendJson(response, 200, { ok: true })
+    sendJson(response, 200, {
+      admin: {
+        id: config.adminWebId,
+        name: config.adminWebName,
+        role: 'superadmin',
+      },
+      ok: true,
+    })
     return
   }
 
@@ -1631,14 +1962,269 @@ export async function routeRequest(request, response) {
   }
 
   if (request.method === 'GET' && url.pathname === '/api/candidates') {
-    requireAdminWebToken(request)
-    sendJson(response, 200, { candidates: await listCandidates() })
+    const admin = requireAdminWebToken(request)
+    const storedCandidates = await listCandidates()
+    await registerCandidateCustomValues(storedCandidates)
+    const [candidates, customValues, labels] = await Promise.all([
+      enrichCandidatesForAdmin(storedCandidates, admin),
+      listCustomTaxonomyValues(),
+      listProfileLabels(),
+    ])
+    sendJson(response, 200, {
+      admin: {
+        id: admin.id,
+        name: admin.name,
+        role: admin.role,
+      },
+      candidates,
+      customValues,
+      labels,
+    })
     return
   }
 
   if (request.method === 'GET' && url.pathname === '/api/candidates/export.csv') {
     requireAdminWebToken(request)
     sendCsv(response, 'face-candidates.csv', candidatesToCsv(await listCandidates()))
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/profile-labels') {
+    const admin = requireAdminWebToken(request)
+    const body = await readJson(request)
+    const label = await createProfileLabel(body, admin)
+
+    await recordAuditEvent({
+      action: 'web_admin.label_created',
+      ...adminAuditFields(admin),
+      labelId: label.id,
+      labelName: label.name,
+      outcome: 'created',
+    })
+
+    sendJson(response, 201, { label, ok: true })
+    return
+  }
+
+  const profileLabelAction = url.pathname.match(/^\/api\/profile-labels\/([^/]+)$/)
+
+  if (request.method === 'POST' && profileLabelAction) {
+    const admin = requireAdminWebToken(request)
+    const [, labelId] = profileLabelAction
+    const body = await readJson(request)
+    const beforeLabel = (await listProfileLabels()).find((item) => item.id === labelId)
+    let label
+
+    if (body.action === 'rename') {
+      label = await renameProfileLabel(labelId, body.name, admin)
+    } else if (body.action === 'delete') {
+      label = await deleteProfileLabel(labelId, admin)
+    } else {
+      sendJson(response, 400, { error: 'Label action must be rename or delete' })
+      return
+    }
+
+    if (!label) {
+      sendJson(response, 404, { error: 'Label not found' })
+      return
+    }
+
+    await recordAuditEvent({
+      action: `web_admin.label_${body.action === 'rename' ? 'renamed' : 'deleted'}`,
+      ...adminAuditFields(admin),
+      labelId,
+      labelName: label.name,
+      nameAfter: body.action === 'rename' ? label.name : null,
+      nameBefore: beforeLabel?.name,
+      outcome: 'updated',
+    })
+
+    sendJson(response, 200, { label, ok: true })
+    return
+  }
+
+  const customValueAction = url.pathname.match(/^\/api\/custom-values\/([^/]+)$/)
+
+  if (request.method === 'POST' && customValueAction) {
+    const admin = requireAdminWebToken(request)
+    const [, customValueId] = customValueAction
+    const body = await readJson(request)
+    const beforeCustomValue = (await listCustomTaxonomyValues()).find((item) => item.id === customValueId)
+    const customValue = await moderateCustomTaxonomyValue(
+      customValueId,
+      String(body.action ?? ''),
+      body,
+      admin,
+    )
+
+    if (!customValue) {
+      sendJson(response, 404, { error: 'Custom value not found' })
+      return
+    }
+
+    await recordAuditEvent({
+      action: `web_admin.custom_value_${body.action}`,
+      ...adminAuditFields(admin),
+      affectedCandidateCount: customValue.affectedCount ?? 0,
+      before: beforeCustomValue,
+      customValueId,
+      after: customValue,
+      field: customValue.field,
+      mergedIntoValue: customValue.mergedIntoValue,
+      outcome: 'updated',
+      value: customValue.value,
+    })
+
+    sendJson(response, 200, { customValue, ok: true })
+    return
+  }
+
+  const candidateProfileEdit = url.pathname.match(/^\/api\/candidates\/([^/]+)\/profile$/)
+
+  if (request.method === 'POST' && candidateProfileEdit) {
+    const admin = requireAdminWebToken(request)
+    const [, candidateId] = candidateProfileEdit
+    const existing = await findCandidate(candidateId)
+
+    if (!existing) {
+      sendJson(response, 404, { error: 'Candidate not found' })
+      return
+    }
+
+    const patch = sanitizeCandidateProfilePatch(await readJson(request))
+    const changes = profileChanges(existing, patch)
+
+    if (!Object.keys(changes).length) {
+      sendJson(response, 200, { candidate: existing, changes: {}, ok: true })
+      return
+    }
+
+    const candidate = await updateCandidateMetadata(candidateId, patch)
+    await registerCandidateCustomValues([candidate], admin)
+    await recordAuditEvent({
+      action: 'web_admin.profile_updated',
+      ...adminAuditFields(admin),
+      candidateId,
+      changes,
+      outcome: 'updated',
+      statusAfterEdit: candidate.status,
+    })
+
+    sendJson(response, 200, { candidate, changes, ok: true })
+    return
+  }
+
+  const candidateLabels = url.pathname.match(/^\/api\/candidates\/([^/]+)\/labels$/)
+
+  if (request.method === 'POST' && candidateLabels) {
+    const admin = requireAdminWebToken(request)
+    const [, candidateId] = candidateLabels
+    const body = await readJson(request)
+    const candidate = await findCandidate(candidateId)
+
+    if (!candidate) {
+      sendJson(response, 404, { error: 'Candidate not found' })
+      return
+    }
+
+    let labelId = String(body.labelId ?? '')
+    let result
+    let label
+
+    if (body.action === 'add') {
+      label = labelId
+        ? (await listProfileLabels()).find((item) => item.id === labelId)
+        : await createProfileLabel({ name: body.name }, admin)
+
+      if (!label) {
+        sendJson(response, 404, { error: 'Label not found' })
+        return
+      }
+      labelId = label.id
+      result = await assignCandidateLabel(candidateId, labelId, admin)
+    } else if (body.action === 'remove') {
+      result = await removeCandidateLabel(candidateId, labelId)
+    } else {
+      sendJson(response, 400, { error: 'Label action must be add or remove' })
+      return
+    }
+
+    if (!result) {
+      sendJson(response, 404, { error: 'Candidate label assignment not found' })
+      return
+    }
+
+    await recordAuditEvent({
+      action: `web_admin.candidate_label_${body.action === 'add' ? 'added' : 'removed'}`,
+      ...adminAuditFields(admin),
+      candidateId,
+      labelId,
+      labelName: label?.name,
+      outcome: 'updated',
+    })
+
+    sendJson(response, 200, { label, ok: true })
+    return
+  }
+
+  const candidateComments = url.pathname.match(/^\/api\/candidates\/([^/]+)\/comments$/)
+
+  if (request.method === 'POST' && candidateComments) {
+    const admin = requireAdminWebToken(request)
+    const [, candidateId] = candidateComments
+    const candidate = await findCandidate(candidateId)
+
+    if (!candidate) {
+      sendJson(response, 404, { error: 'Candidate not found' })
+      return
+    }
+
+    const body = await readJson(request)
+    const comment = await createCandidateComment(candidateId, body.body, admin)
+    await recordAuditEvent({
+      action: 'web_admin.comment_created',
+      ...adminAuditFields(admin),
+      candidateId,
+      commentId: comment.id,
+      outcome: 'created',
+    })
+    sendJson(response, 201, { comment, ok: true })
+    return
+  }
+
+  const candidateCommentAction = url.pathname.match(/^\/api\/comments\/([^/]+)$/)
+
+  if (request.method === 'POST' && candidateCommentAction) {
+    const admin = requireAdminWebToken(request)
+    const [, commentId] = candidateCommentAction
+    const body = await readJson(request)
+    let comment
+
+    if (body.action === 'edit') {
+      comment = await updateCandidateComment(commentId, body.body, admin)
+    } else if (body.action === 'delete') {
+      comment = await deleteCandidateComment(commentId, admin)
+    } else {
+      sendJson(response, 400, { error: 'Comment action must be edit or delete' })
+      return
+    }
+
+    if (!comment) {
+      sendJson(response, 404, { error: 'Comment not found' })
+      return
+    }
+
+    const { previousBody, ...publicComment } = comment
+    await recordAuditEvent({
+      action: `web_admin.comment_${body.action === 'edit' ? 'edited' : 'deleted'}`,
+      ...adminAuditFields(admin),
+      after: body.action === 'edit' ? comment.body : null,
+      before: body.action === 'edit' ? previousBody : comment.body,
+      candidateId: comment.candidateId,
+      commentId,
+      outcome: 'updated',
+    })
+    sendJson(response, 200, { comment: publicComment, ok: true })
     return
   }
 
@@ -1869,7 +2455,7 @@ export async function routeRequest(request, response) {
   const candidateConsent = url.pathname.match(/^\/api\/candidates\/([^/]+)\/consent$/)
 
   if (request.method === 'POST' && candidateConsent) {
-    requireAdminWebToken(request)
+    const admin = requireAdminWebToken(request)
 
     const [, candidateId] = candidateConsent
     const candidate = await findCandidate(candidateId)
@@ -1887,7 +2473,7 @@ export async function routeRequest(request, response) {
     ) {
       metadata = {
         candidateConsentVerifiedAt: new Date().toISOString(),
-        candidateConsentVerifiedBy: 'web_admin',
+        candidateConsentVerifiedBy: admin.id,
         consent: 'proxy_confirmed',
       }
     } else if (
@@ -1901,7 +2487,7 @@ export async function routeRequest(request, response) {
         consent: 'guardian_confirmed',
         guardianConsent: 'verified',
         guardianConsentVerifiedAt: new Date().toISOString(),
-        guardianConsentVerifiedBy: 'web_admin',
+        guardianConsentVerifiedBy: admin.id,
       }
     } else {
       sendJson(response, 409, { error: 'This consent confirmation is not available for the candidate' })
@@ -1917,7 +2503,7 @@ export async function routeRequest(request, response) {
 
     await recordAuditEvent({
       action: 'web_admin.consent_verified',
-      actor: 'web_admin',
+      ...adminAuditFields(admin),
       candidateId,
       confirmation,
       outcome: 'updated',
@@ -1930,11 +2516,11 @@ export async function routeRequest(request, response) {
   const candidateAction = url.pathname.match(/^\/api\/candidates\/([^/]+)\/(approve|reject)$/)
 
   if (request.method === 'POST' && candidateAction) {
-    requireAdminWebToken(request)
+    const admin = requireAdminWebToken(request)
 
     const [, candidateId, action] = candidateAction
     const nextStatus = action === 'approve' ? 'approved' : 'rejected'
-    const candidate = await updateCandidateStatus(candidateId, nextStatus, 'web_admin')
+    const candidate = await updateCandidateStatus(candidateId, nextStatus, admin.id)
 
     if (!candidate) {
       sendJson(response, 404, { error: 'Candidate not found or not editable' })
@@ -1974,7 +2560,7 @@ export async function routeRequest(request, response) {
 
     await recordAuditEvent({
       action: `web_admin.${nextStatus}`,
-      actor: 'web_admin',
+      ...adminAuditFields(admin),
       candidateId,
       outcome: 'updated',
     })
@@ -1986,11 +2572,12 @@ export async function routeRequest(request, response) {
   const candidateRating = url.pathname.match(/^\/api\/candidates\/([^/]+)\/rating$/)
 
   if (request.method === 'POST' && candidateRating) {
-    requireAdminWebToken(request)
+    const admin = requireAdminWebToken(request)
 
     const [, candidateId] = candidateRating
     const body = await readJson(request)
     const rating = Number(body.rating)
+    const beforeCandidate = await findCandidate(candidateId)
 
     if (!Number.isFinite(rating) || rating < 0 || rating > 5 || Math.round(rating * 4) !== rating * 4) {
       sendJson(response, 400, { error: 'Rating must be between 0 and 5 in 0.25 steps' })
@@ -2006,7 +2593,9 @@ export async function routeRequest(request, response) {
 
     await recordAuditEvent({
       action: 'web_admin.rating_updated',
-      actor: 'web_admin',
+      ...adminAuditFields(admin),
+      after: rating,
+      before: Number(beforeCandidate?.rating ?? 0),
       candidateId,
       outcome: 'updated',
       rating,
@@ -2102,7 +2691,7 @@ export async function routeRequest(request, response) {
   }
 
   if (request.method === 'GET' && url.pathname === '/api/audit') {
-    requireAdminWebToken(request)
+    requireSuperAdminWebToken(request)
     sendJson(response, 200, { events: await readAuditEvents() })
     return
   }

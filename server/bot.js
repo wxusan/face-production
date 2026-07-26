@@ -11,6 +11,7 @@ import {
   updateCandidateMetadata,
   updateCandidateStatus,
 } from './candidateRepository.js'
+import { listApprovedCustomValues } from './profileManagementRepository.js'
 import { getRequiredExampleMedia } from './exampleMedia.js'
 import {
   isWithinTelegramFileLimit,
@@ -1012,9 +1013,35 @@ function selectedSet(session, groupName) {
   return session.data[field]
 }
 
-function findMultiLabel(groupName, code, lang) {
-  const option = multiGroups[groupName].options.find((item) => item.code === code)
-  return option ? optionLabel(option, lang) : code
+function multiOptions(session, groupName) {
+  return [
+    ...multiGroups[groupName].options.map((option) => ({
+      ...option,
+      selectedValue: option.code,
+      token: option.code,
+    })),
+    ...(session.dynamicMultiOptions?.[groupName] ?? []),
+  ]
+}
+
+async function prepareDynamicMultiOptions(session, groupName) {
+  const field = multiGroups[groupName].field
+  const approved = await listApprovedCustomValues(field)
+  session.dynamicMultiOptions ??= {}
+  session.dynamicMultiOptions[groupName] = approved.map((item) => ({
+    code: item.value,
+    en: item.value,
+    ru: item.value,
+    selectedValue: item.value,
+    token: `c${item.id.replace(/^CTV-/, '')}`,
+    uz: item.value,
+  }))
+}
+
+function selectedMultiValue(session, groupName, token) {
+  return multiOptions(session, groupName)
+    .find((option) => option.token === token)
+    ?.selectedValue
 }
 
 function isValidName(value) {
@@ -1350,10 +1377,10 @@ function multiKeyboard(session, groupName) {
   const lang = session.lang
   const t = text[lang]
   const selected = selectedSet(session, groupName)
-  const options = multiGroups[groupName].options.map((option) => {
+  const options = multiOptions(session, groupName).map((option) => {
     const label = optionLabel(option, lang)
-    const prefix = selected.includes(option.code) ? '✅ ' : '▫️ '
-    return { text: `${prefix}${label}`, callback_data: `toggle:${groupName}:${option.code}` }
+    const prefix = selected.includes(option.selectedValue) ? '✅ ' : '▫️ '
+    return { text: `${prefix}${label}`, callback_data: `toggle:${groupName}:${option.token}` }
   })
   const rows = chunk(options, 2)
   const utilityRow = [{ text: `✍️ ${t.other}`, callback_data: `other:${groupName}` }]
@@ -1452,6 +1479,7 @@ async function askStep(session) {
   }
 
   if (['performance', 'sports', 'physical', 'languages', 'look'].includes(step)) {
+    await prepareDynamicMultiOptions(session, step)
     const title = {
       languages: t.askLanguages,
       look: t.askLook,
@@ -1869,10 +1897,15 @@ async function handleMultiCallback(query, session) {
   const selected = selectedSet(session, groupName)
 
   if (action === 'toggle') {
-    if (selected.includes(code)) {
-      session.data[group.field] = selected.filter((item) => item !== code)
+    const value = selectedMultiValue(session, groupName, code)
+    if (!value) {
+      await answerCallback(query.id, t.expired)
+      return
+    }
+    if (selected.includes(value)) {
+      session.data[group.field] = selected.filter((item) => item !== value)
     } else {
-      session.data[group.field] = [...selected.filter((item) => item !== t.none), code]
+      session.data[group.field] = [...selected.filter((item) => item !== t.none), value]
     }
     await answerCallback(query.id, 'OK')
     await updateMultiMessage(query, session, groupName)
@@ -2414,6 +2447,10 @@ export const __botTesting = {
     exampleFileIdCache.clear()
     sessions.clear()
     userUpdateChains.clear()
+  },
+  async multiKeyboard(session, groupName) {
+    await prepareDynamicMultiOptions(session, groupName)
+    return multiKeyboard(session, groupName)
   },
   sendExampleMedia(session, entry, options = {}) {
     return sendExampleMedia(session, entry, 'Example', options)

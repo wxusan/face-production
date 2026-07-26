@@ -30,10 +30,21 @@ function sign(payload) {
   return createHmac('sha256', config.adminWebToken).update(payload).digest('base64url')
 }
 
-function createSessionValue() {
+function defaultAdminSession() {
+  return {
+    id: config.adminWebId,
+    name: config.adminWebName,
+    role: 'superadmin',
+  }
+}
+
+function createSessionValue(actor = defaultAdminSession()) {
   const payload = Buffer.from(
     JSON.stringify({
+      adminId: String(actor.id ?? config.adminWebId),
+      adminName: String(actor.name ?? config.adminWebName),
       exp: Math.floor(Date.now() / 1000) + sessionTtlSeconds,
+      role: actor.role === 'admin' ? 'admin' : 'superadmin',
       scope: 'admin',
     }),
   ).toString('base64url')
@@ -41,21 +52,31 @@ function createSessionValue() {
   return `${payload}.${sign(payload)}`
 }
 
-function isSessionValid(request) {
-  if (!config.adminWebToken) return false
+function readSession(request) {
+  if (!config.adminWebToken) return undefined
 
   const value = parseCookies(request)[cookieName]
   const [payload, signature, extra] = String(value ?? '').split('.')
 
   if (!payload || !signature || extra || !safeEqual(signature, sign(payload))) {
-    return false
+    return undefined
   }
 
   try {
     const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
-    return session.scope === 'admin' && Number(session.exp) > Math.floor(Date.now() / 1000)
+    if (session.scope !== 'admin' || Number(session.exp) <= Math.floor(Date.now() / 1000)) {
+      return undefined
+    }
+
+    return {
+      exp: Number(session.exp),
+      id: String(session.adminId ?? config.adminWebId),
+      name: String(session.adminName ?? config.adminWebName),
+      role: session.role === 'admin' ? 'admin' : 'superadmin',
+      scope: 'admin',
+    }
   } catch {
-    return false
+    return undefined
   }
 }
 
@@ -64,14 +85,18 @@ export function authenticateAdminWebToken(token) {
 }
 
 export function isAdminWebAuthorized(request) {
-  return isSessionValid(request)
+  return Boolean(readSession(request))
 }
 
-export function setAdminSession(response) {
+export function getAdminWebSession(request) {
+  return readSession(request)
+}
+
+export function setAdminSession(response, actor) {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
   response.setHeader(
     'set-cookie',
-    `${cookieName}=${createSessionValue()}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${sessionTtlSeconds}${secure}`,
+    `${cookieName}=${createSessionValue(actor)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${sessionTtlSeconds}${secure}`,
   )
 }
 

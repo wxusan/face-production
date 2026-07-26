@@ -26,6 +26,8 @@ const adminIds = parseAdminIds(process.env.TELEGRAM_ADMIN_ID)
 export const config = {
   adminId: adminIds[0] ?? '',
   adminIds,
+  adminWebId: process.env.ADMIN_WEB_ID ?? 'super_admin',
+  adminWebName: process.env.ADMIN_WEB_NAME ?? 'Super Admin',
   adminWebToken: process.env.ADMIN_WEB_TOKEN ?? '',
   host: process.env.HOST ?? '0.0.0.0',
   isHostedRuntime: Boolean(process.env.RAILWAY_SERVICE_ID || process.env.VERCEL),

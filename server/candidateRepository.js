@@ -4,7 +4,9 @@ import { dirname, resolve } from 'node:path'
 import { hasPostgres, query } from './postgres.js'
 import { normalizeCandidateTaxonomy } from './taxonomy.js'
 
-const candidatePath = resolve(process.cwd(), 'var/candidate-intakes.json')
+const candidatePath = resolve(
+  process.env.CANDIDATE_STORAGE_PATH ?? resolve(process.cwd(), 'var/candidate-intakes.json'),
+)
 
 const seedCandidates = [
   {
