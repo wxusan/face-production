@@ -88,7 +88,13 @@ test('rapid repeated /start leaves exactly one current prompt', async () => {
   const state = __botTesting.sessionFor(userId)
   assert.equal(state.step, 'language')
   assert.equal(state.promptMessageIds.length, 1)
-  assert.equal(calls.filter((entry) => entry.method === 'deleteMessage').length, 1)
+  assert.equal(calls.filter((entry) => entry.method === 'deleteMessage').length, 0)
+  assert.deepEqual(
+    calls
+      .filter((entry) => entry.method === 'editMessageReplyMarkup')
+      .map((entry) => entry.payload.message_id),
+    [100],
+  )
 })
 
 test('a language button can advance only once', async () => {
@@ -106,6 +112,53 @@ test('a language button can advance only once', async () => {
   assert.equal(sentMessages().length, 1)
   assert.equal(__botTesting.sessionFor(userId).step, 'mode')
   assert.equal(calls.filter((entry) => entry.method === 'answerCallbackQuery').length, 2)
+})
+
+test('all three interface languages advance with their localized registration prompt', async () => {
+  const cases = [
+    { expected: 'Для кого заполняем анкету?', index: 0, lang: 'ru', userId: 910031 },
+    { expected: 'Who is this profile for?', index: 1, lang: 'en', userId: 910032 },
+    { expected: 'Anketa kim uchun?', index: 2, lang: 'uz', userId: 910033 },
+  ]
+
+  for (const item of cases) {
+    await handleBotUpdate(messageUpdate(item.userId, item.userId, '/start'))
+    const languageMessage = sentMessages().at(-1)
+    const callbackData = languageMessage.payload.reply_markup.inline_keyboard[0][item.index].callback_data
+    const languageMessageId = nextMessageId - 1
+    calls.length = 0
+
+    await handleBotUpdate(callbackUpdate(
+      item.userId + 100,
+      item.userId,
+      languageMessageId,
+      callbackData,
+    ))
+
+    const state = __botTesting.sessionFor(item.userId)
+    assert.equal(state.lang, item.lang)
+    assert.equal(state.step, 'mode')
+    assert.equal(sentMessages().at(-1).payload.text, item.expected)
+    calls.length = 0
+  }
+})
+
+test('an in-progress registration resumes from durable session state after a runtime restart', async () => {
+  const userId = 910034
+  await handleBotUpdate(messageUpdate(34, userId, '/start'))
+  const languageMessage = sentMessages().at(-1)
+  const callbackData = languageMessage.payload.reply_markup.inline_keyboard[0][2].callback_data
+  const languageMessageId = nextMessageId - 1
+
+  __botTesting.resetRuntimeState()
+  calls.length = 0
+
+  await handleBotUpdate(callbackUpdate(35, userId, languageMessageId, callbackData))
+
+  const state = __botTesting.sessionFor(userId)
+  assert.equal(state.lang, 'uz')
+  assert.equal(state.step, 'mode')
+  assert.equal(sentMessages().at(-1).payload.text, 'Anketa kim uchun?')
 })
 
 test('rapid text answers cannot skip a registration step', async () => {

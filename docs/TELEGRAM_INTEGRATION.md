@@ -77,7 +77,9 @@ The candidate registration flow collects:
 - portrait photo
 - intro video up to 90 seconds (1:30)
 
-The bot sends local example photos from `~/Downloads` before each required photo prompt. It deletes completed prompt/answer messages where Telegram allows it, shows an emoji progress bar, then sends the user a profile review album with photos, video, and profile information. The user can approve the card or choose a section to edit.
+The bot sends the gender-matched example from private object storage before each required photo and intro-video prompt. It keeps the user's answers and the bot's written questions, removes completed inline buttons, and annotates the selected answer on the original question. Only temporary example media is deleted after the matching candidate upload, `/cancel`, or a replacement `/start`.
+
+The final review keeps the complete profile card and candidate media visible. Telegram `file_id` values for example media are stored in Postgres and reused after restarts. Railway's pre-deploy step uploads the ten optimized example photographs and validates all ten photos plus both intro videos, so missing required media fails deployment instead of being silently skipped.
 
 Available admin bot commands:
 

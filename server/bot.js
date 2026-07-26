@@ -1,6 +1,5 @@
 import { loadLocalEnv } from './env.js'
 import { randomUUID } from 'node:crypto'
-import { stat } from 'node:fs/promises'
 import { recordAuditEvent } from './auditLog.js'
 import { listActiveCastingsForCandidate } from './castingRepository.js'
 import { deleteBotSession, getBotSession, saveBotSession } from './botSessionRepository.js'
@@ -12,9 +11,16 @@ import {
   updateCandidateMetadata,
   updateCandidateStatus,
 } from './candidateRepository.js'
+import { getRequiredExampleMedia } from './exampleMedia.js'
 import { readMediaReference, saveTelegramFile } from './photoStorage.js'
 import { talentLabel, talentTaxonomy } from './taxonomy.js'
 import { callTelegramApi } from './telegramApi.js'
+import {
+  getTelegramExampleFile,
+  invalidateTelegramExampleFile,
+  recordTelegramExampleAvailability,
+  upsertTelegramExampleFile,
+} from './telegramExampleRepository.js'
 
 loadLocalEnv()
 
@@ -35,18 +41,6 @@ if (!token && process.env.TELEGRAM_DISABLED !== 'true') {
 }
 
 const totalProgressSteps = 18
-
-const exampleMediaPaths = {
-  fallbackIntroVideo: 's3://face-candidate-media/examples/male-intro.mp4',
-  female: {
-    introVideo: 's3://face-candidate-media/examples/female-intro.mp4',
-  },
-  male: {
-    introVideo: 's3://face-candidate-media/examples/male-intro.mp4',
-  },
-}
-
-const telegramExampleVideoMaxBytes = 49 * 1024 * 1024
 
 const text = {
   en: {
@@ -95,6 +89,8 @@ const text = {
     editPrompt: 'Which section do you want to edit?',
     expired: 'This button has expired. Use the newest message or send /start.',
     examplePhoto: 'Example photo',
+    exampleUnavailable: 'The example could not be loaded. Follow the written instruction below.',
+    exampleVideo: 'Example video',
     help: 'Commands: /start, /help, /cancel. Your current registration progress is preserved when you use /help.',
     inProgress: 'Registration is already in progress. Finish it or send /cancel before using the main menu.',
     keepCurrent: 'Leave current',
@@ -174,6 +170,8 @@ const text = {
     editPrompt: 'Какой раздел хотите изменить?',
     expired: 'Эта кнопка устарела. Используйте последнее сообщение или отправьте /start.',
     examplePhoto: 'Пример фото',
+    exampleUnavailable: 'Пример временно не загрузился. Следуйте инструкции ниже.',
+    exampleVideo: 'Пример видео',
     help: 'Команды: /start, /help, /cancel. Команда /help не сбрасывает текущую регистрацию.',
     inProgress: 'Регистрация уже идет. Завершите ее или отправьте /cancel перед использованием главного меню.',
     keepCurrent: 'Оставить текущее',
@@ -253,6 +251,8 @@ const text = {
     editPrompt: 'Qaysi bo‘limni o‘zgartirasiz?',
     expired: 'Bu tugma eskirgan. Eng so‘nggi xabardan foydalaning yoki /start yuboring.',
     examplePhoto: 'Foto namunasi',
+    exampleUnavailable: 'Namuna vaqtincha yuklanmadi. Quyidagi yozma ko‘rsatmaga amal qiling.',
+    exampleVideo: 'Video namunasi',
     help: 'Buyruqlar: /start, /help, /cancel. /help joriy ro‘yxatdan o‘tish jarayonini bekor qilmaydi.',
     inProgress: 'Ro‘yxatdan o‘tish davom etmoqda. Asosiy menyudan oldin uni tugating yoki /cancel yuboring.',
     keepCurrent: 'Joriyni qoldirish',
@@ -556,6 +556,10 @@ async function sendPrompt(session, messageText, options = {}) {
   const sent = await send(session.chatId, messageText, options)
   session.promptMessageIds ??= []
   session.promptMessageIds.push(sent.message_id)
+  if (options.reply_markup?.inline_keyboard) {
+    session.inlinePromptMessageIds ??= []
+    session.inlinePromptMessageIds.push(sent.message_id)
+  }
   return sent
 }
 
@@ -596,17 +600,81 @@ async function safeDelete(chatId, messageId) {
   }
 }
 
-async function cleanupStep(session) {
-  const messageIds = [...new Set(session.promptMessageIds ?? [])]
-  await Promise.all(messageIds.map((messageId) => safeDelete(session.chatId, messageId)))
+async function safeDisableInlineKeyboard(chatId, messageId) {
+  if (!chatId || !messageId) {
+    return
+  }
+
+  try {
+    await call('editMessageReplyMarkup', {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: [] },
+    })
+  } catch (error) {
+    console.warn('Telegram inline keyboard cleanup skipped', { code: error?.code ?? error?.name ?? 'unknown' })
+  }
+}
+
+function answerAnnotation(lang, value) {
+  const label = {
+    en: 'Answer',
+    ru: 'Ответ',
+    uz: 'Javob',
+  }[lang] ?? 'Answer'
+
+  return `✅ ${label}: ${value}`
+}
+
+async function annotateCompletedInlineQuestion(query, session, value) {
+  const messageText = query.message?.text
+  const messageId = query.message?.message_id
+
+  if (!messageText || !messageId) {
+    return
+  }
+
+  const annotation = answerAnnotation(session.lang, value)
+  const completedText = messageText.includes(annotation)
+    ? messageText
+    : `${messageText}\n\n${annotation}`
+
+  try {
+    await editMessage(session.chatId, messageId, completedText, {
+      reply_markup: { inline_keyboard: [] },
+    })
+  } catch (error) {
+    console.warn('Telegram completed answer annotation skipped', { code: error?.code ?? error?.name ?? 'unknown' })
+    await safeDisableInlineKeyboard(session.chatId, messageId)
+  }
+}
+
+async function cleanupStep(session, { excludeMessageId } = {}) {
+  const inlineMessageIds = [...new Set(
+    session.inlinePromptMessageIds
+      ?? session.promptMessageIds
+      ?? [],
+  )].filter((messageId) => messageId !== excludeMessageId)
+  await Promise.all(inlineMessageIds.map((messageId) => safeDisableInlineKeyboard(session.chatId, messageId)))
   session.promptMessageIds = []
+  session.inlinePromptMessageIds = []
   session.multiMessageId = undefined
 }
 
-async function cleanupPreview(session) {
-  const messageIds = [...new Set(session.previewMessageIds ?? [])]
-  await Promise.all(messageIds.map((messageId) => safeDelete(session.chatId, messageId)))
+async function cleanupPreview(session, { excludeMessageId } = {}) {
+  const messageIds = [...new Set([
+    ...(session.previewControlMessageId ? [session.previewControlMessageId] : []),
+    ...(session.previewControlMessageId ? [] : session.previewMessageIds ?? []),
+  ])].filter((messageId) => messageId !== excludeMessageId)
+  await Promise.all(messageIds.map((messageId) => safeDisableInlineKeyboard(session.chatId, messageId)))
   session.previewMessageIds = []
+  session.previewControlMessageId = undefined
+}
+
+async function cleanupTemporaryExamples(session) {
+  const messageIds = [...new Set(session.temporaryExampleMessageIds ?? [])]
+  await Promise.all(messageIds.map((messageId) => safeDelete(session.chatId, messageId)))
+  session.temporaryExampleMessageIds = []
 }
 
 async function cleanupSessionMessages(session) {
@@ -617,6 +685,7 @@ async function cleanupSessionMessages(session) {
   await Promise.all([
     cleanupStep(session),
     cleanupPreview(session),
+    cleanupTemporaryExamples(session),
   ])
 }
 
@@ -738,34 +807,109 @@ function genderCodeForData(data) {
   return femaleLabels.includes(gender) ? 'female' : 'male'
 }
 
-function exampleMediaPath(session, kind) {
-  const genderCode = genderCodeForData(session.data)
-  return exampleMediaPaths[genderCode]?.[kind] ?? exampleMediaPaths.male[kind] ?? null
+function exampleMediaForSession(session, step) {
+  return getRequiredExampleMedia(genderCodeForData(session.data), step)
 }
 
-async function videoExamplePath(session) {
-  const preferredPath = exampleMediaPath(session, 'introVideo')
+function telegramExampleCacheKey(entry) {
+  return {
+    assetKey: `${entry.gender}.${entry.step}`,
+    mediaKind: entry.kind,
+    telegramMethod: entry.kind === 'video' ? 'sendVideo' : 'sendPhoto',
+  }
+}
 
-  if (preferredPath == null) {
-    return exampleMediaPaths.fallbackIntroVideo
+function telegramMediaIdentity(result, kind) {
+  if (kind === 'video') {
+    return result?.video
   }
 
-  if (preferredPath.startsWith('s3://')) {
-    return preferredPath
+  return result?.photo?.at(-1)
+}
+
+function isInvalidTelegramFileIdentifier(error) {
+  return (
+    error?.statusCode === 400
+    && /file.?id|file identifier|wrong file/i.test(String(error?.message ?? ''))
+  )
+}
+
+async function sendExampleMedia(session, entry, caption, { sendSource } = {}) {
+  const cacheKey = telegramExampleCacheKey(entry)
+  const cached = await getTelegramExampleFile(cacheKey)
+
+  if (cached?.fileId) {
+    try {
+      return entry.kind === 'video'
+        ? await call('sendVideo', {
+            caption,
+            chat_id: session.chatId,
+            supports_streaming: true,
+            video: cached.fileId,
+          })
+        : await call('sendPhoto', {
+            caption,
+            chat_id: session.chatId,
+            photo: cached.fileId,
+          })
+    } catch (error) {
+      if (!isInvalidTelegramFileIdentifier(error)) {
+        throw error
+      }
+
+      await invalidateTelegramExampleFile({
+        ...cacheKey,
+        errorCode: error.code ?? 'telegram_file_invalid',
+      })
+      exampleFileIdCache.delete(entry.reference)
+    }
   }
 
   try {
-    const info = await stat(preferredPath)
-    if (info.size <= telegramExampleVideoMaxBytes) {
-      return preferredPath
+    const sent = sendSource
+      ? await sendSource({ caption, entry, session })
+      : entry.kind === 'video'
+        ? await sendLocalVideo(session.chatId, entry.reference, caption)
+        : await sendLocalPhoto(session.chatId, entry.reference, caption)
+    const media = telegramMediaIdentity(sent, entry.kind)
+
+    if (!media?.file_id) {
+      throw new Error(`Telegram did not return a reusable file_id for ${cacheKey.assetKey}`)
     }
 
-    console.info('Telegram video example exceeded the size limit; using fallback')
+    try {
+      await upsertTelegramExampleFile({
+        ...cacheKey,
+        fileId: media.file_id,
+        fileUniqueId: media.file_unique_id,
+      })
+    } catch (cacheError) {
+      console.error('Telegram example file_id persistence failed', {
+        assetKey: cacheKey.assetKey,
+        code: cacheError?.code ?? cacheError?.name ?? 'unknown',
+      })
+    }
+    return sent
   } catch (error) {
-    console.warn('Telegram video example unavailable; using fallback', { code: error?.code ?? error?.name ?? 'unknown' })
+    const missingSource = (
+      error?.name === 'NoSuchKey'
+      || error?.code === 'NoSuchKey'
+      || error?.$metadata?.httpStatusCode === 404
+    )
+    try {
+      await recordTelegramExampleAvailability({
+        ...cacheKey,
+        availabilityStatus: missingSource ? 'missing' : 'unknown',
+        errorCode: error.code ?? error.name ?? 'example_send_failed',
+      })
+    } catch (availabilityError) {
+      console.error('Telegram example availability record failed', {
+        assetKey: cacheKey.assetKey,
+        code: availabilityError?.code ?? availabilityError?.name ?? 'unknown',
+      })
+    }
+    throw error
   }
-
-  return exampleMediaPaths.fallbackIntroVideo
 }
 
 function chunk(items, size) {
@@ -813,10 +957,14 @@ function newSession(chatId, from, lang, existing, options = {}) {
     data: baseData,
     editing: false,
     flowId: options.flowId ?? randomUUID().slice(0, 12),
+    inlinePromptMessageIds: [],
     lang,
+    previewMessageIds: [],
+    promptMessageIds: [],
     proxy,
     replacingCandidateId: proxy ? undefined : existing?.id,
     step: 'name',
+    temporaryExampleMessageIds: [],
   }
 }
 
@@ -831,10 +979,13 @@ function newEntrySession(chatId, from) {
     },
     editing: false,
     flowId: randomUUID().slice(0, 12),
+    inlinePromptMessageIds: [],
     lang: 'en',
+    previewMessageIds: [],
     promptMessageIds: [],
     proxy: false,
     step: 'language',
+    temporaryExampleMessageIds: [],
   }
 }
 
@@ -1101,16 +1252,18 @@ async function sendReviewAlbum(chatId, data, lang) {
 async function sendPhotoStepPrompt(session, step) {
   const lang = session.lang
   const t = text[lang]
-  const examplePath = exampleMediaPath(session, step)
+  const example = exampleMediaForSession(session, step)
 
-  if (examplePath) {
-    try {
-      const example = await sendLocalPhoto(session.chatId, examplePath, `📌 ${t.examplePhoto}`)
-      session.promptMessageIds ??= []
-      session.promptMessageIds.push(example.message_id)
-    } catch (error) {
-      console.warn('Telegram photo example send failed', { code: error?.code ?? error?.name ?? 'unknown' })
-    }
+  try {
+    const sent = await sendExampleMedia(session, example, `📌 ${t.examplePhoto}`)
+    session.temporaryExampleMessageIds ??= []
+    session.temporaryExampleMessageIds.push(sent.message_id)
+  } catch (error) {
+    console.error('Telegram required photo example send failed', {
+      assetKey: `${example.gender}.${example.step}`,
+      code: error?.code ?? error?.name ?? 'unknown',
+    })
+    await sendPrompt(session, `⚠️ ${t.exampleUnavailable}`)
   }
 
   const current = stepCurrentValue(session.data, step, lang)
@@ -1124,16 +1277,18 @@ async function sendPhotoStepPrompt(session, step) {
 async function sendVideoStepPrompt(session) {
   const lang = session.lang
   const t = text[lang]
-  const examplePath = await videoExamplePath(session)
+  const example = exampleMediaForSession(session, 'video')
 
-  if (examplePath) {
-    try {
-      const example = await sendLocalVideo(session.chatId, examplePath, `📌 ${t.examplePhoto}`)
-      session.promptMessageIds ??= []
-      session.promptMessageIds.push(example.message_id)
-    } catch (error) {
-      console.warn('Telegram video example send failed', { code: error?.code ?? error?.name ?? 'unknown' })
-    }
+  try {
+    const sent = await sendExampleMedia(session, example, `📌 ${t.exampleVideo}`)
+    session.temporaryExampleMessageIds ??= []
+    session.temporaryExampleMessageIds.push(sent.message_id)
+  } catch (error) {
+    console.error('Telegram required video example send failed', {
+      assetKey: `${example.gender}.${example.step}`,
+      code: error?.code ?? error?.name ?? 'unknown',
+    })
+    await sendPrompt(session, `⚠️ ${t.exampleUnavailable}`)
   }
 
   const current = stepCurrentValue(session.data, 'video', lang)
@@ -1325,6 +1480,7 @@ async function showProfile(session) {
       : ''
   const card = await send(session.chatId, `${text[session.lang].reviewActions}${consentNotice}`, profileActions(session.lang, session.previewToken))
   session.previewMessageIds.push(card.message_id)
+  session.previewControlMessageId = card.message_id
 }
 
 function castingCard(casting) {
@@ -1578,8 +1734,9 @@ async function handleLanguageCallback(query, session) {
   }
 
   await answerCallback(query.id, text[lang].askLanguage)
-  await cleanupStep(session)
+  await cleanupStep(session, { excludeMessageId: query.message?.message_id })
   session.lang = lang
+  await annotateCompletedInlineQuestion(query, session, languageOptions.find((option) => option.code === lang)?.label ?? lang)
   session.step = 'mode'
   await askRegistrationMode(session)
 }
@@ -1600,7 +1757,12 @@ async function handleModeCallback(query, session) {
   }
 
   await answerCallback(query.id, text[lang].askMode)
-  await cleanupStep(session)
+  await cleanupStep(session, { excludeMessageId: query.message?.message_id })
+  await annotateCompletedInlineQuestion(
+    query,
+    session,
+    mode === 'friend' ? text[lang].registerFriend : text[lang].registerSelf,
+  )
   await startForm(query.message.chat.id, query.from, lang, {
     flowId: randomUUID().slice(0, 12),
     proxy: mode === 'friend',
@@ -1611,6 +1773,7 @@ async function handleSetCallback(query, session) {
   const [, field, code] = query.data.split(':')
   const lang = session.lang
   const expectedStep = field === 'city' ? 'city' : field === 'gender' ? 'gender' : undefined
+  let selectedAnswer
 
   if (await isStaleCallback(query, session, expectedStep)) {
     return
@@ -1619,16 +1782,19 @@ async function handleSetCallback(query, session) {
   if (field === 'city') {
     const city = cityOptions.find((option) => option.code === code)
     session.data.city = optionLabel(city, lang)
+    selectedAnswer = session.data.city
   }
 
   if (field === 'gender') {
     const gender = genderOptions.find((option) => option.code === code)
     session.data.gender = optionLabel(gender, lang)
     session.data.genderCode = code
+    selectedAnswer = session.data.gender
   }
 
   await answerCallback(query.id, 'OK')
-  await cleanupStep(session, query.message)
+  await cleanupStep(session, { excludeMessageId: query.message?.message_id })
+  await annotateCompletedInlineQuestion(query, session, selectedAnswer ?? code)
   await afterStep(session)
 }
 
@@ -1645,7 +1811,10 @@ async function handleKeepCallback(query, session) {
   }
 
   await answerCallback(query.id, text[session.lang].keepCurrent)
-  await cleanupStep(session, query.message)
+  const currentValue = stepCurrentValue(session.data, step, session.lang)
+  await cleanupStep(session, { excludeMessageId: query.message?.message_id })
+  await cleanupTemporaryExamples(session)
+  await annotateCompletedInlineQuestion(query, session, currentValue || text[session.lang].keepCurrent)
   await afterStep(session)
 }
 
@@ -1690,7 +1859,8 @@ async function handleMultiCallback(query, session) {
   if (action === 'other') {
     session.awaitingCustomGroup = groupName
     await answerCallback(query.id, t.other)
-    await cleanupStep(session, query.message)
+    await cleanupStep(session, { excludeMessageId: query.message?.message_id })
+    await annotateCompletedInlineQuestion(query, session, t.other)
     await sendPrompt(session, t.sendCustom)
     return
   }
@@ -1702,7 +1872,9 @@ async function handleMultiCallback(query, session) {
       return
     }
     await answerCallback(query.id, t.next)
-    await cleanupStep(session, query.message)
+    const selectedSummary = listTalentValue(session.data[group.field], session.lang)
+    await cleanupStep(session, { excludeMessageId: query.message?.message_id })
+    await annotateCompletedInlineQuestion(query, session, selectedSummary)
     await afterStep(session)
   }
 }
@@ -1739,7 +1911,8 @@ async function handleFormCallback(query, session) {
 
   if (action === 'edit') {
     await answerCallback(query.id, t.edit)
-    await cleanupPreview(session)
+    await cleanupPreview(session, { excludeMessageId: query.message?.message_id })
+    await annotateCompletedInlineQuestion(query, session, t.edit)
     await sendPrompt(session, t.editPrompt, editKeyboard(session.lang))
     return
   }
@@ -1751,7 +1924,8 @@ async function handleFormCallback(query, session) {
     }
 
     await answerCallback(query.id, t.approveProfile)
-    await cleanupPreview(session)
+    await cleanupPreview(session, { excludeMessageId: query.message?.message_id })
+    await annotateCompletedInlineQuestion(query, session, t.approveProfile)
     const wasUpdate = Boolean(session.replacingCandidateId)
     await saveProfile(session)
     await send(session.chatId, session.editing || wasUpdate ? t.savedAfterEdit : t.approved, candidateMenuKeyboard(session.lang))
@@ -1778,7 +1952,9 @@ async function handleEditCallback(query, session) {
   }
 
   await answerCallback(query.id, text[session.lang].edit)
-  await safeDelete(query.message.chat.id, query.message.message_id)
+  await cleanupStep(session, { excludeMessageId: query.message?.message_id })
+  const section = editSections.find((item) => item.code === step)
+  await annotateCompletedInlineQuestion(query, session, optionLabel(section, session.lang))
   await askStep(session)
 }
 
@@ -2049,6 +2225,7 @@ async function handleTextMessage(chatId, from, message) {
     }
 
     await cleanupStep(session)
+    await cleanupTemporaryExamples(session)
     await afterStep(session)
     return
   }
@@ -2063,6 +2240,7 @@ async function handleTextMessage(chatId, from, message) {
     session.data.introVideoPath = video.path
     session.data.introVideoDuration = video.duration
     await cleanupStep(session)
+    await cleanupTemporaryExamples(session)
     await afterStep(session)
     return
   }
@@ -2118,6 +2296,8 @@ async function handleBotUpdateSerial(update) {
   const message = update.message
   const from = query?.from ?? message?.from
   const userId = from?.id ? String(from.id) : undefined
+  const updateId = Number(update.update_id)
+  const validUpdateId = Number.isSafeInteger(updateId) && updateId >= 0
 
   const chat = query?.message?.chat ?? message?.chat
 
@@ -2132,23 +2312,41 @@ async function handleBotUpdateSerial(update) {
     await hydrateSession(userId)
   }
 
+  const hydratedSession = userId ? sessions.get(userId) : undefined
+  if (
+    validUpdateId
+    && Number.isSafeInteger(hydratedSession?.lastAppliedUpdateId)
+    && hydratedSession.lastAppliedUpdateId >= updateId
+  ) {
+    return { handled: false, reason: 'user_update_already_applied' }
+  }
+
+  let handledSuccessfully = false
+
   try {
     if (query) {
       console.info('Telegram callback received', { updateId: update.update_id })
       await handleCallback(query)
+      handledSuccessfully = true
       return { handled: true, type: 'callback_query' }
     }
 
     if (!message?.chat?.id || !message.from?.id) {
+      handledSuccessfully = true
       return { handled: false, reason: 'unsupported_update' }
     }
 
     console.info('Telegram message received', { updateId: update.update_id, contentType: message.text ? 'text' : message.contact ? 'contact' : message.photo ? 'photo' : message.video ? 'video' : 'other' })
 
     await handleTextMessage(message.chat.id, message.from, message)
+    handledSuccessfully = true
     return { handled: true, type: 'message' }
   } finally {
     if (userId) {
+      const activeSession = sessions.get(userId)
+      if (handledSuccessfully && validUpdateId && activeSession) {
+        activeSession.lastAppliedUpdateId = updateId
+      }
       await persistSession(userId)
     }
   }
@@ -2166,13 +2364,33 @@ export async function handleBotUpdate(update) {
 }
 
 export const __botTesting = {
+  async askCurrentStep(userId) {
+    const session = sessions.get(String(userId))
+    if (!session) {
+      throw new Error('Test session was not found')
+    }
+    return askStep(session)
+  },
   resetRuntimeState() {
     exampleFileIdCache.clear()
     sessions.clear()
     userUpdateChains.clear()
   },
+  sendExampleMedia(session, entry, options = {}) {
+    return sendExampleMedia(session, entry, 'Example', options)
+  },
+  reviewPreview(data, lang = 'en') {
+    const card = profileCard(data, lang)
+    return {
+      card,
+      mediaItems: reviewMediaItems(data, clipTelegramCaption(card)),
+    }
+  },
   sessionFor(userId) {
     const session = sessions.get(String(userId))
     return session ? structuredClone(session) : undefined
+  },
+  setSession(userId, session) {
+    sessions.set(String(userId), structuredClone(session))
   },
 }

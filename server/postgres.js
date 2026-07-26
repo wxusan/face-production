@@ -172,6 +172,25 @@ async function _runSchemaInit() {
     `)
     await client.query('CREATE INDEX IF NOT EXISTS telegram_deliveries_status_idx ON telegram_deliveries (status, updated_at)')
     await client.query(`
+      CREATE TABLE IF NOT EXISTS telegram_example_files (
+        asset_key text NOT NULL,
+        telegram_method text NOT NULL,
+        media_kind text NOT NULL,
+        file_id text,
+        file_unique_id text,
+        availability_status text NOT NULL DEFAULT 'unknown'
+          CHECK (availability_status IN ('unknown', 'available', 'missing', 'invalid')),
+        last_validation_error_code text,
+        last_validated_at timestamptz,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (asset_key, telegram_method, media_kind)
+      )
+    `)
+    await client.query(
+      'CREATE INDEX IF NOT EXISTS telegram_example_files_availability_idx ON telegram_example_files (availability_status, updated_at)',
+    )
+    await client.query(`
       CREATE TABLE IF NOT EXISTS castings (
         id text PRIMARY KEY,
         status text NOT NULL DEFAULT 'active',

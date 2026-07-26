@@ -1,4 +1,10 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3'
 
 let client
 
@@ -79,6 +85,21 @@ export async function getObject(reference) {
   }
 
   return Buffer.concat(chunks)
+}
+
+export async function headObject(reference) {
+  const result = await getClient().send(
+    new HeadObjectCommand({
+      Bucket: process.env.OBJECT_STORAGE_BUCKET,
+      Key: objectKeyFromReference(reference),
+    }),
+  )
+
+  return {
+    contentLength: Number(result.ContentLength ?? 0),
+    contentType: result.ContentType ?? '',
+    etag: result.ETag ?? '',
+  }
 }
 
 export async function deleteObject(reference) {
