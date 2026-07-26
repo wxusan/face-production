@@ -63,7 +63,7 @@ async function readJson(request) {
 
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, {
-    'access-control-allow-headers': 'content-type',
+    'access-control-allow-headers': 'content-type, x-face-admin-token',
     'access-control-allow-methods': 'GET,POST,OPTIONS',
     'access-control-allow-origin': 'http://127.0.0.1:5173',
     'cache-control': 'no-store, private',
@@ -100,7 +100,7 @@ function sendHtml(response, statusCode, content) {
 
 function sendCsv(response, filename, content) {
   response.writeHead(200, {
-    'access-control-allow-headers': 'content-type',
+    'access-control-allow-headers': 'content-type, x-face-admin-token',
     'access-control-allow-methods': 'GET,POST,OPTIONS',
     'access-control-allow-origin': 'http://127.0.0.1:5173',
     'cache-control': 'no-store, private',
@@ -986,7 +986,10 @@ function candidateAdminHtml() {
             var response = await fetch('/api/auth/login', {
               method: 'POST',
               credentials: 'same-origin',
-              headers: { 'content-type': 'application/json' },
+              headers: {
+                'content-type': 'application/json',
+                'x-face-admin-token': token
+              },
               body: JSON.stringify({ token: token })
             });
             var data = await response.json();
@@ -1482,8 +1485,10 @@ export async function routeRequest(request, response) {
 
   if (request.method === 'POST' && url.pathname === '/api/auth/login') {
     const body = await readJson(request)
+    const headerToken = request.headers['x-face-admin-token']
+    const token = Array.isArray(headerToken) ? headerToken[0] : headerToken
 
-    if (!authenticateAdminWebToken(body.token)) {
+    if (!authenticateAdminWebToken(token || body.token)) {
       sendJson(response, 403, { error: 'Admin web authorization failed' })
       return
     }

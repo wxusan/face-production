@@ -77,6 +77,7 @@ export type AuditEvent = {
 
 type RequestOptions = {
   body?: unknown
+  headers?: Record<string, string>
   method?: string
 }
 
@@ -86,6 +87,7 @@ async function apiRequest<T>(path: string, options: RequestOptions): Promise<T> 
     credentials: 'same-origin',
     headers: {
       'content-type': 'application/json',
+      ...options.headers,
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
   })
@@ -105,7 +107,11 @@ export async function getHealth() {
 }
 
 export async function loginAdmin(token: string) {
-  return apiRequest<{ ok: true }>('/api/auth/login', { body: { token }, method: 'POST' })
+  return apiRequest<{ ok: true }>('/api/auth/login', {
+    body: { token },
+    headers: { 'x-face-admin-token': token },
+    method: 'POST',
+  })
 }
 
 export async function logoutAdmin() {
