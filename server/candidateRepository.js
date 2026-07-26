@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { hasPostgres, query } from './postgres.js'
@@ -80,6 +81,22 @@ function normalizeCandidateForRow(candidate) {
   }
 }
 
+function postgresCandidateParams(row) {
+  return [
+    row.id,
+    row.status,
+    row.source,
+    row.name,
+    row.phone,
+    row.telegramUserId,
+    row.telegramUsername,
+    row.city,
+    row.gender,
+    row.age,
+    row.data,
+  ]
+}
+
 async function readPostgresCandidates() {
   const result = await query(`
     SELECT *
@@ -90,10 +107,92 @@ async function readPostgresCandidates() {
   return result.rows.map(rowToCandidate)
 }
 
+async function findPostgresCandidate(candidateId) {
+  const result = await query(
+    `
+      SELECT *
+      FROM candidates
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [candidateId],
+  )
+
+  return result.rows[0] ? rowToCandidate(result.rows[0]) : undefined
+}
+
+async function insertPostgresCandidate(candidate) {
+  const row = normalizeCandidateForRow(candidate)
+  const result = await query(
+    `
+      INSERT INTO candidates (
+        id,
+        status,
+        source,
+        name,
+        phone,
+        telegram_user_id,
+        telegram_username,
+        city,
+        gender,
+        age,
+        data,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        $8,
+        $9,
+        $10,
+        $11::jsonb,
+        COALESCE(($11::jsonb->>'createdAt')::timestamptz, now()),
+        COALESCE(($11::jsonb->>'updatedAt')::timestamptz, now())
+      )
+      RETURNING *
+    `,
+    postgresCandidateParams(row),
+  )
+
+  return rowToCandidate(result.rows[0])
+}
+
+async function updatePostgresCandidate(candidate) {
+  const row = normalizeCandidateForRow(candidate)
+  const result = await query(
+    `
+      UPDATE candidates
+      SET
+        status = $2,
+        source = $3,
+        name = $4,
+        phone = $5,
+        telegram_user_id = $6,
+        telegram_username = $7,
+        city = $8,
+        gender = $9,
+        age = $10,
+        data = $11::jsonb,
+        created_at = COALESCE(($11::jsonb->>'createdAt')::timestamptz, candidates.created_at),
+        updated_at = COALESCE(($11::jsonb->>'updatedAt')::timestamptz, now())
+      WHERE id = $1
+      RETURNING *
+    `,
+    postgresCandidateParams(row),
+  )
+
+  return result.rows[0] ? rowToCandidate(result.rows[0]) : undefined
+}
+
 async function upsertPostgresCandidate(candidate) {
   const row = normalizeCandidateForRow(candidate)
-
-  await query(
+  const result = await query(
     `
       INSERT INTO candidates (
         id,
@@ -137,21 +236,12 @@ async function upsertPostgresCandidate(candidate) {
         age = EXCLUDED.age,
         data = EXCLUDED.data,
         updated_at = COALESCE((EXCLUDED.data->>'updatedAt')::timestamptz, now())
+      RETURNING *
     `,
-    [
-      row.id,
-      row.status,
-      row.source,
-      row.name,
-      row.phone,
-      row.telegramUserId,
-      row.telegramUsername,
-      row.city,
-      row.gender,
-      row.age,
-      row.data,
-    ],
+    postgresCandidateParams(row),
   )
+
+  return rowToCandidate(result.rows[0])
 }
 
 async function readStoredCandidates() {
@@ -164,21 +254,57 @@ async function readStoredCandidates() {
 
 async function writeStoredCandidates(candidates) {
   if (hasPostgres()) {
-    await Promise.all(candidates.map((candidate) => upsertPostgresCandidate(candidate)))
-    return
+    throw new Error('Whole-collection PostgreSQL writes are not supported')
   }
 
   await writeJsonCandidates(candidates)
 }
 
-function createCandidateId(candidates) {
-  const nextNumber =
-    candidates.reduce((max, candidate) => {
-      const match = String(candidate.id ?? '').match(/^TG-(\d+)$/)
-      return match ? Math.max(max, Number(match[1])) : max
-    }, 0) + 1
+function createCandidateId() {
+  return `TG-${randomUUID()}`
+}
 
-  return `TG-${String(nextNumber).padStart(4, '0')}`
+function normalizePhone(phone) {
+  return String(phone ?? '').replace(/\D/g, '')
+}
+
+function candidateAge(candidate) {
+  const age = Number(candidate?.age)
+  return Number.isInteger(age) && age > 0 ? age : undefined
+}
+
+export function candidateMessagingChatId(candidate) {
+  return candidate?.telegramChatId
+    ?? candidate?.submittedByTelegramChatId
+    ?? candidate?.telegramUserId
+    ?? candidate?.submittedByTelegramUserId
+}
+
+export function hasRequiredCandidateConsent(candidate) {
+  const age = candidateAge(candidate)
+
+  if (!age) {
+    return false
+  }
+
+  const consent = String(candidate.consent ?? '')
+
+  if (age < 18) {
+    const guardianConsent = String(candidate.guardianConsent ?? '').toLowerCase()
+    return consent === 'guardian_confirmed' && ['confirmed', 'verified', 'yes'].includes(guardianConsent)
+  }
+
+  if (candidate.submissionMode === 'friend') {
+    return consent === 'proxy_confirmed'
+  }
+
+  return ['candidate_confirmed', 'confirmed', 'not_required'].includes(consent)
+}
+
+export function isCandidateEligibleForMessaging(candidate) {
+  return Boolean(candidateMessagingChatId(candidate))
+    && ['approved', 'verified'].includes(candidate?.status)
+    && hasRequiredCandidateConsent(candidate)
 }
 
 export async function listCandidateIntakes() {
@@ -196,26 +322,51 @@ export async function listCandidates() {
 }
 
 export async function createCandidateIntake(candidate) {
-  const candidates = await readStoredCandidates()
   const now = new Date().toISOString()
   const created = {
     ...candidate,
     consent: candidate.consent ?? 'missing',
     createdAt: now,
-    id: createCandidateId(candidates),
+    id: createCandidateId(),
     source: candidate.source ?? 'telegram',
     status: 'pending_review',
     updatedAt: now,
   }
 
+  if (hasPostgres()) {
+    return insertPostgresCandidate(created)
+  }
+
+  const candidates = await readJsonCandidates()
   candidates.push(created)
   await writeStoredCandidates(candidates)
-
   return created
 }
 
 export async function replaceCandidateIntake(candidateId, candidate) {
-  const candidates = await readStoredCandidates()
+  const now = new Date().toISOString()
+
+  if (hasPostgres()) {
+    const existing = await findPostgresCandidate(candidateId)
+    if (!existing) {
+      return undefined
+    }
+
+    return updatePostgresCandidate({
+      ...existing,
+      ...candidate,
+      consent: candidate.consent ?? existing.consent ?? 'missing',
+      createdAt: existing.createdAt ?? now,
+      id: existing.id,
+      reviewedBy: undefined,
+      source: existing.source ?? 'telegram',
+      status: 'pending_review',
+      telegramUserId: existing.telegramUserId ?? candidate.telegramUserId,
+      updatedAt: now,
+    })
+  }
+
+  const candidates = await readJsonCandidates()
   const existingIndex = candidates.findIndex((item) => item.id === candidateId)
 
   if (existingIndex === -1) {
@@ -223,7 +374,6 @@ export async function replaceCandidateIntake(candidateId, candidate) {
   }
 
   const existing = candidates[existingIndex]
-  const now = new Date().toISOString()
   const updated = {
     ...existing,
     ...candidate,
@@ -239,51 +389,115 @@ export async function replaceCandidateIntake(candidateId, candidate) {
 
   candidates[existingIndex] = updated
   await writeStoredCandidates(candidates)
-
   return updated
 }
 
 export async function findCandidate(candidateId) {
-  const candidates = await listCandidates()
-  return candidates.find((candidate) => candidate.id === candidateId)
+  const candidate = hasPostgres()
+    ? await findPostgresCandidate(candidateId)
+    : (await readJsonCandidates()).find((item) => item.id === candidateId)
+
+  if (candidate) {
+    return candidate
+  }
+
+  return process.env.INCLUDE_SEED_CANDIDATES === 'true'
+    ? seedCandidates.find((item) => item.id === candidateId)
+    : undefined
 }
 
 export async function findCandidateByTelegramId(telegramUserId) {
-  const candidates = await readStoredCandidates()
   const userId = String(telegramUserId)
-  return candidates.find((candidate) => String(candidate.telegramUserId ?? '') === userId)
+
+  if (hasPostgres()) {
+    const result = await query(
+      `
+        SELECT *
+        FROM candidates
+        WHERE telegram_user_id = $1
+        ORDER BY created_at ASC, id ASC
+        LIMIT 1
+      `,
+      [userId],
+    )
+
+    return result.rows[0] ? rowToCandidate(result.rows[0]) : undefined
+  }
+
+  return (await readJsonCandidates()).find((candidate) => String(candidate.telegramUserId ?? '') === userId)
 }
 
 export async function findCandidateByPhone(phone) {
-  const candidates = await readStoredCandidates()
   const normalized = normalizePhone(phone)
 
   if (!normalized) {
     return undefined
   }
 
-  return candidates.find((candidate) => normalizePhone(candidate.phone) === normalized)
+  if (hasPostgres()) {
+    const result = await query(
+      `
+        SELECT *
+        FROM candidates
+        WHERE regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g') = $1
+        ORDER BY created_at ASC, id ASC
+        LIMIT 1
+      `,
+      [normalized],
+    )
+
+    return result.rows[0] ? rowToCandidate(result.rows[0]) : undefined
+  }
+
+  return (await readJsonCandidates()).find((candidate) => normalizePhone(candidate.phone) === normalized)
 }
 
 export async function updateCandidateStatus(candidateId, status, reviewedBy) {
-  const candidates = await readStoredCandidates()
+  if (hasPostgres()) {
+    const candidate = await findPostgresCandidate(candidateId)
+
+    if (!candidate || (['approved', 'verified'].includes(status) && !hasRequiredCandidateConsent(candidate))) {
+      return undefined
+    }
+
+    return updatePostgresCandidate({
+      ...candidate,
+      reviewedBy,
+      status,
+      updatedAt: new Date().toISOString(),
+    })
+  }
+
+  const candidates = await readJsonCandidates()
   const candidate = candidates.find((item) => item.id === candidateId)
 
-  if (!candidate) {
+  if (!candidate || (['approved', 'verified'].includes(status) && !hasRequiredCandidateConsent(candidate))) {
     return undefined
   }
 
   candidate.status = status
   candidate.reviewedBy = reviewedBy
   candidate.updatedAt = new Date().toISOString()
-
   await writeStoredCandidates(candidates)
-
   return candidate
 }
 
 export async function updateCandidateMetadata(candidateId, metadata) {
-  const candidates = await readStoredCandidates()
+  if (hasPostgres()) {
+    const candidate = await findPostgresCandidate(candidateId)
+
+    if (!candidate) {
+      return undefined
+    }
+
+    return updatePostgresCandidate({
+      ...candidate,
+      ...metadata,
+      updatedAt: new Date().toISOString(),
+    })
+  }
+
+  const candidates = await readJsonCandidates()
   const candidate = candidates.find((item) => item.id === candidateId)
 
   if (!candidate) {
@@ -295,17 +509,22 @@ export async function updateCandidateMetadata(candidateId, metadata) {
   })
 
   await writeStoredCandidates(candidates)
-
   return candidate
 }
 
 export async function upsertCandidateIntake(candidate) {
-  const candidates = await readStoredCandidates()
-  const existingIndex = candidates.findIndex((item) => item.id === candidate.id)
   const nextCandidate = {
     ...candidate,
+    id: candidate.id ?? createCandidateId(),
     updatedAt: candidate.updatedAt ?? new Date().toISOString(),
   }
+
+  if (hasPostgres()) {
+    return upsertPostgresCandidate(nextCandidate)
+  }
+
+  const candidates = await readJsonCandidates()
+  const existingIndex = candidates.findIndex((item) => item.id === nextCandidate.id)
 
   if (existingIndex === -1) {
     candidates.push(nextCandidate)
@@ -317,28 +536,29 @@ export async function upsertCandidateIntake(candidate) {
   }
 
   await writeStoredCandidates(candidates)
-
   return nextCandidate
 }
 
 export async function listPendingCandidateIntakes() {
-  const candidates = await readStoredCandidates()
-  return candidates.filter((candidate) => candidate.status === 'pending_review')
+  if (hasPostgres()) {
+    const result = await query(`
+      SELECT *
+      FROM candidates
+      WHERE status = 'pending_review'
+      ORDER BY created_at ASC, id ASC
+    `)
+
+    return result.rows.map(rowToCandidate)
+  }
+
+  return (await readJsonCandidates()).filter((candidate) => candidate.status === 'pending_review')
 }
 
 export async function getBroadcastDryRun() {
   const candidates = await listCandidates()
 
   return {
-    blocked: candidates.filter((candidate) => {
-      return candidate.consent === 'missing' || candidate.status === 'rejected'
-    }),
-    eligible: candidates.filter((candidate) => {
-      return candidate.consent !== 'missing' && ['approved', 'verified'].includes(candidate.status)
-    }),
+    blocked: candidates.filter((candidate) => !isCandidateEligibleForMessaging(candidate)),
+    eligible: candidates.filter(isCandidateEligibleForMessaging),
   }
-}
-
-function normalizePhone(phone) {
-  return String(phone ?? '').replace(/\D/g, '')
 }

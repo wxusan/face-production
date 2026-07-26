@@ -1,8 +1,6 @@
 import { loadLocalEnv } from './env.js'
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
-import { resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { recordAuditEvent } from './auditLog.js'
 import { listActiveCastingsForCandidate } from './castingRepository.js'
 import { deleteBotSession, getBotSession, saveBotSession } from './botSessionRepository.js'
@@ -33,8 +31,6 @@ const exampleFileIdCache = new Map()
 if (!token) {
   throw new Error('TELEGRAM_BOT_TOKEN is missing')
 }
-
-const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])
 
 const totalProgressSteps = 18
 
@@ -419,8 +415,6 @@ const photoSteps = {
   },
 }
 
-let me
-
 async function call(method, payload = {}) {
   const response = await fetch(`${apiBase}/${method}`, {
     method: 'POST',
@@ -435,29 +429,6 @@ async function call(method, payload = {}) {
 
   return data.result
 }
-
-async function ensureBotReady({ deleteWebhook = false } = {}) {
-  while (!me) {
-    try {
-      if (deleteWebhook) {
-        await call('deleteWebhook', { drop_pending_updates: false })
-      }
-      me = await call('getMe')
-      console.log(`Bot runner active: @${me.username}`)
-      console.log(`Admin IDs: ${adminIds.join(', ')}`)
-      console.log('Inline language form enabled: ru, en, uz.')
-    } catch (error) {
-      if (!isDirectRun) {
-        throw error
-      }
-      console.log(`Bot startup waiting for Telegram API: ${error.message}`)
-      await new Promise((resolve) => setTimeout(resolve, 5000))
-    }
-  }
-}
-
-// Kick off getMe eagerly so it's done before the first request arrives
-ensureBotReady().catch((err) => console.error('ensureBotReady background init failed:', err.message))
 
 async function hydrateSession(userId) {
   if (sessions.has(userId)) {
@@ -635,7 +606,7 @@ async function safeDelete(chatId, messageId) {
       message_id: messageId,
     })
   } catch (error) {
-    console.log(`Message cleanup skipped: ${error.message}`)
+    console.warn('Telegram message cleanup skipped', { code: error?.code ?? error?.name ?? 'unknown' })
   }
 }
 
@@ -799,9 +770,9 @@ async function videoExamplePath(session) {
       return preferredPath
     }
 
-    console.log(`Video example too large, using fallback: ${preferredPath} (${info.size} bytes)`)
+    console.info('Telegram video example exceeded the size limit; using fallback')
   } catch (error) {
-    console.log(`Video example unavailable, using fallback: ${error.message}`)
+    console.warn('Telegram video example unavailable; using fallback', { code: error?.code ?? error?.name ?? 'unknown' })
   }
 
   return exampleMediaPaths.fallbackIntroVideo
@@ -1129,7 +1100,7 @@ async function sendPhotoStepPrompt(session, step) {
       session.promptMessageIds ??= []
       session.promptMessageIds.push(example.message_id)
     } catch (error) {
-      console.log(`Photo example send failed: ${error.message}`)
+      console.warn('Telegram photo example send failed', { code: error?.code ?? error?.name ?? 'unknown' })
     }
   }
 
@@ -1152,7 +1123,7 @@ async function sendVideoStepPrompt(session) {
       session.promptMessageIds ??= []
       session.promptMessageIds.push(example.message_id)
     } catch (error) {
-      console.log(`Video example send failed: ${error.message}`)
+      console.warn('Telegram video example send failed', { code: error?.code ?? error?.name ?? 'unknown' })
     }
   }
 
@@ -1327,12 +1298,17 @@ async function showProfile(session) {
     const albumMessages = await sendReviewAlbum(session.chatId, session.data, session.lang)
     session.previewMessageIds.push(...albumMessages.map((message) => message.message_id))
   } catch (error) {
-    console.log(`User preview media failed: ${error.message}`)
+    console.warn('Telegram user preview media failed', { code: error?.code ?? error?.name ?? 'unknown' })
     const fallback = await send(session.chatId, profileCard(session.data, session.lang))
     session.previewMessageIds.push(fallback.message_id)
   }
 
-  const card = await send(session.chatId, text[session.lang].reviewActions, profileActions(session.lang, session.previewToken))
+  const consentNotice = session.proxy
+    ? '\n\nBy submitting, you confirm you are authorized to share this person\'s data. Their consent must be verified before any use or contact.'
+    : Number(session.data.age) < 18
+      ? '\n\nA parent or guardian must be verified by FACE Production before this minor\'s data can be used.'
+      : ''
+  const card = await send(session.chatId, `${text[session.lang].reviewActions}${consentNotice}`, profileActions(session.lang, session.previewToken))
   session.previewMessageIds.push(card.message_id)
 }
 
@@ -1364,7 +1340,7 @@ async function sendCurrentProfile(chatId, candidate, lang) {
   try {
     await sendReviewAlbum(chatId, candidate, lang)
   } catch (error) {
-    console.log(`Current profile media failed: ${error.message}`)
+    console.warn('Telegram current profile media failed', { code: error?.code ?? error?.name ?? 'unknown' })
     await send(chatId, profileCard(candidate, lang), userMenuKeyboard(lang))
     return
   }
@@ -1446,17 +1422,28 @@ async function saveProfile(session) {
     throw new Error('User approval is required before admin notification')
   }
 
+  const isMinor = Number(session.data.age) < 18
+  const consent = session.proxy
+    ? 'proxy_submitter_confirmed_pending_candidate_consent'
+    : isMinor
+      ? 'minor_pending_guardian_verification'
+      : 'candidate_confirmed'
+  const guardianConsent = isMinor
+    ? 'requires_manual_guardian_verification'
+    : 'not_required'
+
   const candidatePayload = {
     ...session.data,
     availability: '',
-    consent: 'confirmed',
+    consent,
     experience: '',
-    guardianConsent: 'not_required',
+    guardianConsent,
     language: session.lang,
     role: 'Кандидат',
     skills: allTalents(session.data).join(', '),
     source: session.proxy ? 'telegram_proxy' : session.data.source ?? 'telegram',
     submissionMode: session.proxy ? 'friend' : session.data.submissionMode ?? 'self',
+    submitterConsentConfirmedAt: new Date().toISOString(),
   }
   const saved = session.replacingCandidateId
     ? await replaceCandidateIntake(session.replacingCandidateId, candidatePayload)
@@ -1485,7 +1472,7 @@ async function notifyAdmin(candidate) {
       adminDecisionMessageText: decisionMessage.text,
     })
   } catch (error) {
-    console.log(`Admin notification failed: ${error.message}`)
+    console.warn('Telegram admin notification failed', { code: error?.code ?? error?.name ?? 'unknown' })
   }
 }
 
@@ -2036,6 +2023,15 @@ export async function handleBotUpdate(update) {
   const from = query?.from ?? message?.from
   const userId = from?.id ? String(from.id) : undefined
 
+  const chat = query?.message?.chat ?? message?.chat
+
+  if (chat?.type !== 'private') {
+    if (query?.id) {
+      await answerCallback(query.id, 'This bot is available in private chat only.')
+    }
+    return { handled: false, reason: 'private_chat_required' }
+  }
+
   // Skip DB session load for commands that reset state immediately anyway
   const isStatelessCommand = !query && /^\/(start|help|cancel)\b/i.test(String(message?.text ?? '').trim())
 
@@ -2044,73 +2040,23 @@ export async function handleBotUpdate(update) {
   }
 
   try {
-    try {
-      if (query) {
-        console.log(`Callback ${update.update_id}: from=${query.from.id} data=${query.data}`)
-        await handleCallback(query)
-        return { handled: true, type: 'callback_query' }
-      }
-
-      if (!message?.chat?.id || !message.from?.id) {
-        return { handled: false, reason: 'unsupported_update' }
-      }
-
-      const chatId = message.chat.id
-      const label = message.text ?? (message.contact ? '[contact]' : message.photo ? '[photo]' : message.video ? '[video]' : '[non-text]')
-      console.log(`Update ${update.update_id}: from=${message.from.id} chat=${chatId} text=${label}`)
-
-      await handleTextMessage(chatId, message.from, message)
-      return { handled: true, type: 'message' }
-    } catch (error) {
-      console.error('handleBotUpdate failed:', error?.stack ?? error)
-
-      const session = userId ? sessions.get(userId) : undefined
-      const errorChatId = message?.chat?.id ?? query?.message?.chat?.id
-      const lang = session?.lang ?? 'ru'
-      const errorText = text[lang]?.unknown ?? 'Произошла ошибка. Попробуйте позже.'
-
-      if (errorChatId) {
-        try {
-          await send(errorChatId, errorText)
-        } catch (sendError) {
-          console.error('Failed to notify user of error:', sendError?.message ?? sendError)
-        }
-      }
-
-      return { handled: false, error: error?.message ?? 'unknown' }
+    if (query) {
+      console.info('Telegram callback received', { updateId: update.update_id })
+      await handleCallback(query)
+      return { handled: true, type: 'callback_query' }
     }
+
+    if (!message?.chat?.id || !message.from?.id) {
+      return { handled: false, reason: 'unsupported_update' }
+    }
+
+    console.info('Telegram message received', { updateId: update.update_id, contentType: message.text ? 'text' : message.contact ? 'contact' : message.photo ? 'photo' : message.video ? 'video' : 'other' })
+
+    await handleTextMessage(message.chat.id, message.from, message)
+    return { handled: true, type: 'message' }
   } finally {
     if (userId) {
       await persistSession(userId)
     }
   }
-}
-
-export async function startBotPolling() {
-  await ensureBotReady({ deleteWebhook: true })
-
-  let offset
-
-  while (true) {
-    try {
-      const updates = await call('getUpdates', {
-        allowed_updates: ['message', 'callback_query'],
-        limit: 20,
-        offset,
-        timeout: 25,
-      })
-
-      for (const update of updates) {
-        offset = update.update_id + 1
-        await handleBotUpdate(update)
-      }
-    } catch (error) {
-      console.log(`Polling error: ${error.message}`)
-      await new Promise((resolve) => setTimeout(resolve, 3000))
-    }
-  }
-}
-
-if (isDirectRun) {
-  await startBotPolling()
 }

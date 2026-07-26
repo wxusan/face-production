@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
+import { isCandidateEligibleForMessaging } from './candidateRepository.js'
 import { hasPostgres, query } from './postgres.js'
 
 const castingsPath = resolve(process.cwd(), 'var/castings.json')
@@ -21,14 +23,8 @@ async function writeJsonCastings(castings) {
   await writeFile(castingsPath, `${JSON.stringify(castings, null, 2)}\n`, 'utf8')
 }
 
-function createCastingId(castings) {
-  const nextNumber =
-    castings.reduce((max, casting) => {
-      const match = String(casting.id ?? '').match(/^CAST-(\d+)$/)
-      return match ? Math.max(max, Number(match[1])) : max
-    }, 0) + 1
-
-  return `CAST-${String(nextNumber).padStart(4, '0')}`
+function createCastingId() {
+  return `CAST-${randomUUID()}`
 }
 
 function rowToCasting(row) {
@@ -48,6 +44,19 @@ function rowToCasting(row) {
   }
 }
 
+function postgresCastingParams(casting) {
+  return [
+    casting.id,
+    casting.status ?? 'active',
+    casting.title,
+    casting.body,
+    casting.startsAt ?? '',
+    casting.endsAt ?? '',
+    casting.targetCandidateIds ?? [],
+    JSON.stringify(casting),
+  ]
+}
+
 async function readPostgresCastings() {
   const result = await query(`
     SELECT *
@@ -58,8 +67,22 @@ async function readPostgresCastings() {
   return result.rows.map(rowToCasting)
 }
 
-async function upsertPostgresCasting(casting) {
-  await query(
+async function findPostgresCasting(castingId) {
+  const result = await query(
+    `
+      SELECT *
+      FROM castings
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [castingId],
+  )
+
+  return result.rows[0] ? rowToCasting(result.rows[0]) : undefined
+}
+
+async function insertPostgresCasting(casting) {
+  const result = await query(
     `
       INSERT INTO castings (
         id,
@@ -85,27 +108,12 @@ async function upsertPostgresCasting(casting) {
         COALESCE(($8::jsonb->>'createdAt')::timestamptz, now()),
         COALESCE(($8::jsonb->>'updatedAt')::timestamptz, now())
       )
-      ON CONFLICT (id) DO UPDATE SET
-        status = EXCLUDED.status,
-        title = EXCLUDED.title,
-        body = EXCLUDED.body,
-        starts_at = EXCLUDED.starts_at,
-        ends_at = EXCLUDED.ends_at,
-        target_candidate_ids = EXCLUDED.target_candidate_ids,
-        data = EXCLUDED.data,
-        updated_at = now()
+      RETURNING *
     `,
-    [
-      casting.id,
-      casting.status ?? 'active',
-      casting.title,
-      casting.body,
-      casting.startsAt ?? '',
-      casting.endsAt ?? '',
-      casting.targetCandidateIds ?? [],
-      JSON.stringify(casting),
-    ],
+    postgresCastingParams(casting),
   )
+
+  return rowToCasting(result.rows[0])
 }
 
 async function readStoredCastings() {
@@ -118,8 +126,7 @@ async function readStoredCastings() {
 
 async function writeStoredCastings(castings) {
   if (hasPostgres()) {
-    await Promise.all(castings.map((casting) => upsertPostgresCasting(casting)))
-    return
+    throw new Error('Whole-collection PostgreSQL writes are not supported')
   }
 
   await writeJsonCastings(castings)
@@ -130,14 +137,13 @@ export async function listCastings() {
 }
 
 export async function createCasting(casting) {
-  const castings = await readStoredCastings()
   const now = new Date().toISOString()
   const created = {
     body: String(casting.body ?? '').trim(),
     createdAt: now,
     createdBy: casting.createdBy ?? 'web_admin',
     endsAt: casting.endsAt || '',
-    id: createCastingId(castings),
+    id: createCastingId(),
     sentAt: casting.sentAt ?? '',
     startsAt: casting.startsAt || '',
     status: casting.status ?? 'active',
@@ -146,20 +152,31 @@ export async function createCasting(casting) {
     updatedAt: now,
   }
 
+  if (hasPostgres()) {
+    return insertPostgresCasting(created)
+  }
+
+  const castings = await readJsonCastings()
   castings.unshift(created)
   await writeStoredCastings(castings)
-
   return created
 }
 
 export async function findCasting(castingId) {
-  const castings = await listCastings()
-  return castings.find((casting) => casting.id === castingId)
+  if (hasPostgres()) {
+    return findPostgresCasting(castingId)
+  }
+
+  return (await readJsonCastings()).find((casting) => casting.id === castingId)
 }
 
 export async function listActiveCastingsForCandidate(candidate) {
+  if (!isCandidateEligibleForMessaging(candidate)) {
+    return []
+  }
+
   const now = new Date()
-  const candidateId = candidate?.id
+  const candidateId = candidate.id
   const castings = await listCastings()
 
   return castings.filter((casting) => {

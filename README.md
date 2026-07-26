@@ -11,30 +11,22 @@ npm install
 npm run dev
 ```
 
-Run the secure backend in a second terminal:
+Run the backend:
 
 ```bash
 npm run server
 ```
 
-Run Telegram local polling when you want the bot to answer Telegram messages during development:
-
-```bash
-npm run bot
-```
-
-Keep the web API running separately with Telegram polling disabled:
-
-```bash
-TELEGRAM_ENABLE_POLLING=false npm run server
-```
+The Telegram bot is webhook-only. For an end-to-end bot test, deploy a staging
+service or expose the local server through an authenticated public HTTPS tunnel,
+then set Telegram's webhook to that URL. Do not start a local polling process.
 
 Secrets live in `.env.local`, which is ignored by git. Use `.env.example` as the template.
 
-Local admin dashboard passcode in this development workspace:
+Set a unique local admin dashboard passcode in `.env.local`:
 
 ```text
-face-admin-local
+ADMIN_WEB_TOKEN=<generate-a-random-local-value>
 ```
 
 ## Current Product Slice
@@ -76,6 +68,7 @@ No live architecture feature should be added without product prioritization and 
 - [Architecture](./docs/ARCHITECTURE.md)
 - [Governance](./docs/GOVERNANCE.md)
 - [Supabase Migration](./docs/SUPABASE_MIGRATION.md)
+- [Railway Migration](./docs/RAILWAY_MIGRATION.md)
 - [Telegram Integration](./docs/TELEGRAM_INTEGRATION.md)
 - [Technical Decisions](./docs/TECHNICAL_DECISIONS.md)
 - [Vercel Deployment](./docs/VERCEL_DEPLOYMENT.md)

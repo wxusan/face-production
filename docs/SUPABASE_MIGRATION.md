@@ -70,10 +70,11 @@ OBJECT_STORAGE_FORCE_PATH_STYLE=true
 Keep your existing Telegram/admin variables:
 
 ```text
-ADMIN_WEB_TOKEN=face-admin-local
+ADMIN_WEB_TOKEN=<generate-a-random-local-value>
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_ADMIN_ID=1753566525,718222668
-TELEGRAM_ENABLE_POLLING=true
+# The bot is webhook-only; do not enable polling.
+TELEGRAM_ENABLE_POLLING=false
 SERVER_PORT=8787
 ```
 
@@ -110,11 +111,10 @@ When checks pass:
 npm run migrate:postgres
 ```
 
-Then restart the app:
+Then restart the backend:
 
 ```bash
 npm run server
-npm run bot
 ```
 
 `/api/health` should show:
@@ -130,7 +130,7 @@ mediaStorageProvider: object-storage
 - PostgreSQL stores only candidate data and media references.
 - Supabase Storage bucket should stay private.
 - The backend serves media to the admin portal through protected endpoints.
-- Run only one active Telegram polling process at a time.
+- The bot is webhook-only; set the webhook to the public backend URL.
 
 ## Sources
 

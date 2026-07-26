@@ -1,19 +1,18 @@
 const API_BASE = ''
 
-export function getCandidateExportUrl(token: string) {
-  return `${API_BASE}/api/candidates/export.csv?token=${encodeURIComponent(token)}`
+export function getCandidateExportUrl() {
+  return `${API_BASE}/api/candidates/export.csv`
 }
 
-export function getCandidatePhotoUrl(candidateId: string, token: string) {
-  return `${API_BASE}/api/candidates/${candidateId}/photo?token=${encodeURIComponent(token)}`
+export function getCandidatePhotoUrl(candidateId: string) {
+  return `${API_BASE}/api/candidates/${candidateId}/photo`
 }
 
 export function getCandidateMediaUrl(
   candidateId: string,
   kind: 'closeShotPhoto' | 'fullBodyPhoto' | 'introVideo' | 'leftProfilePhoto' | 'portraitPhoto' | 'rightProfilePhoto',
-  token: string,
 ) {
-  return `${API_BASE}/api/candidates/${candidateId}/media/${kind}?token=${encodeURIComponent(token)}`
+  return `${API_BASE}/api/candidates/${candidateId}/media/${kind}`
 }
 
 export type ApiCandidate = {
@@ -79,15 +78,14 @@ export type AuditEvent = {
 type RequestOptions = {
   body?: unknown
   method?: string
-  token: string
 }
 
 async function apiRequest<T>(path: string, options: RequestOptions): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: options.method ?? 'GET',
+    credentials: 'same-origin',
     headers: {
       'content-type': 'application/json',
-      'x-admin-token': options.token,
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
   })
@@ -102,30 +100,36 @@ async function apiRequest<T>(path: string, options: RequestOptions): Promise<T> 
 }
 
 export async function getHealth() {
-  const response = await fetch(`${API_BASE}/api/health`)
+  const response = await fetch(`${API_BASE}/api/health`, { credentials: 'same-origin' })
   return response.json()
 }
 
-export async function listApiCandidates(token: string) {
-  const data = await apiRequest<{ candidates: ApiCandidate[] }>('/api/candidates', { token })
+export async function loginAdmin(token: string) {
+  return apiRequest<{ ok: true }>('/api/auth/login', { body: { token }, method: 'POST' })
+}
+
+export async function logoutAdmin() {
+  return apiRequest<{ ok: true }>('/api/auth/logout', { method: 'POST' })
+}
+
+export async function listApiCandidates() {
+  const data = await apiRequest<{ candidates: ApiCandidate[] }>('/api/candidates', {})
   return data.candidates
 }
 
-export async function approveCandidate(candidateId: string, token: string) {
+export async function approveCandidate(candidateId: string) {
   return apiRequest<{ candidate: ApiCandidate; ok: true }>(`/api/candidates/${candidateId}/approve`, {
     method: 'POST',
-    token,
   })
 }
 
-export async function rejectCandidate(candidateId: string, token: string) {
+export async function rejectCandidate(candidateId: string) {
   return apiRequest<{ candidate: ApiCandidate; ok: true }>(`/api/candidates/${candidateId}/reject`, {
     method: 'POST',
-    token,
   })
 }
 
-export async function listAuditEvents(token: string) {
-  const data = await apiRequest<{ events: AuditEvent[] }>('/api/audit', { token })
+export async function listAuditEvents() {
+  const data = await apiRequest<{ events: AuditEvent[] }>('/api/audit', {})
   return data.events
 }

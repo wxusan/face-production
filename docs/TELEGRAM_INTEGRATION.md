@@ -4,19 +4,8 @@
 
 The token is loaded from `.env.local`, never from React frontend code.
 
-The standalone bot runner is now the Telegram polling owner:
-
-```bash
-npm run bot
-```
-
-The web API should run with Telegram polling disabled:
-
-```bash
-TELEGRAM_ENABLE_POLLING=false npm run server
-```
-
-Do not run API polling and the standalone bot at the same time. Telegram updates should be consumed by one poller only.
+The bot is webhook-only. Telegram sends updates to
+`POST /api/telegram/webhook`; there is no local polling runner.
 
 Configured admin:
 
@@ -46,11 +35,8 @@ Start the API:
 npm run server
 ```
 
-Start the standalone Telegram bot:
-
-```bash
-npm run bot
-```
+For an end-to-end Telegram test, give that API a secure public HTTPS URL and
+set the webhook with `npm run webhook:set -- https://<PUBLIC_DOMAIN>`.
 
 Open the admin UI:
 
@@ -58,10 +44,10 @@ Open the admin UI:
 http://127.0.0.1:5173/
 ```
 
-Development admin passcode:
+Development admin passcode (set a unique value in `.env.local`):
 
 ```text
-face-admin-local
+ADMIN_WEB_TOKEN=<generate-a-random-local-value>
 ```
 
 Candidate commands:
@@ -105,6 +91,8 @@ Non-admin Telegram users can register candidate profiles. They cannot run admin 
 ## API Endpoints
 
 - `GET /api/health`
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
 - `GET /api/candidates`
 - `GET /api/candidates/export.csv`
 - `GET /api/candidates/:id/photo`
@@ -115,10 +103,13 @@ Non-admin Telegram users can register candidate profiles. They cannot run admin 
 - `POST /api/admin/broadcast-dry-run`
 - `POST /api/candidates/:id/approve`
 - `POST /api/candidates/:id/reject`
+- `POST /api/candidates/:id/consent`
 - `POST /api/candidates/:id/message`
 - `GET /api/audit`
 
-Admin web endpoints require the `x-admin-token` header.
+Admin web endpoints require the signed, HttpOnly session cookie created by
+`POST /api/auth/login`. The admin secret is never stored in browser storage,
+placed in a URL, or sent on every API request.
 
 ## Governance Rules
 

@@ -96,6 +96,18 @@ async function _runSchemaInit() {
     `)
     await client.query('CREATE INDEX IF NOT EXISTS bot_sessions_updated_at_idx ON bot_sessions (updated_at)')
     await client.query(`
+      CREATE TABLE IF NOT EXISTS telegram_updates (
+        update_id bigint PRIMARY KEY,
+        status text NOT NULL CHECK (status IN ('processing', 'completed', 'failed')),
+        attempt_count integer NOT NULL DEFAULT 1,
+        claimed_at timestamptz NOT NULL DEFAULT now(),
+        processed_at timestamptz,
+        last_error_code text,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `)
+    await client.query('CREATE INDEX IF NOT EXISTS telegram_updates_status_claimed_idx ON telegram_updates (status, claimed_at)')
+    await client.query(`
       CREATE TABLE IF NOT EXISTS castings (
         id text PRIMARY KEY,
         status text NOT NULL DEFAULT 'active',

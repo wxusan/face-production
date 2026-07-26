@@ -24,8 +24,10 @@ import {
   getCandidateExportUrl,
   getCandidateMediaUrl,
   getHealth,
+  loginAdmin,
   listApiCandidates,
   listAuditEvents,
+  logoutAdmin,
   rejectCandidate,
   type AuditEvent,
 } from './api'
@@ -246,8 +248,8 @@ function App() {
   ], [t])
   const [activeView, setActiveView] = useState<ViewId>('candidates')
   const [apiStatus, setApiStatus] = useState<'checking' | 'connected' | 'offline'>('checking')
-  const [adminToken, setAdminToken] = useState(() => localStorage.getItem('face-admin-token') ?? '')
-  const [tokenInput, setTokenInput] = useState(adminToken)
+  const [isAuthed, setIsAuthed] = useState(false)
+  const [tokenInput, setTokenInput] = useState('')
   const [authError, setAuthError] = useState('')
   const [candidateRows, setCandidateRows] = useState(candidates)
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([])
@@ -255,7 +257,6 @@ function App() {
   const [query, setQuery] = useState('')
   const [selectedCandidate, setSelectedCandidate] = useState(candidates[0].id)
   const [campaignMode, setCampaignMode] = useState<'targeted' | 'broad'>('targeted')
-  const isAuthed = Boolean(adminToken)
 
   const filteredCandidates = useMemo(() => {
     const normalized = query.trim().toLowerCase()
@@ -312,18 +313,15 @@ function App() {
     return () => controller.abort()
   }, [])
 
-  const loadAdminData = useCallback(async (token = adminToken) => {
-    if (!token) {
-      return
-    }
-
+  const loadAdminData = useCallback(async () => {
     setAuthError('')
 
     try {
       const [apiCandidates, events] = await Promise.all([
-        listApiCandidates(token),
-        listAuditEvents(token),
+        listApiCandidates(),
+        listAuditEvents(),
       ])
+      setIsAuthed(true)
       const mappedCandidates = apiCandidates.map(mapApiCandidate)
       setCandidateRows(mappedCandidates)
       setAuditEvents(events.slice(-8).reverse())
@@ -333,10 +331,9 @@ function App() {
       }
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Ошибка доступа')
-      setAdminToken('')
-      localStorage.removeItem('face-admin-token')
+      setIsAuthed(false)
     }
-  }, [adminToken, selectedCandidate])
+  }, [selectedCandidate])
 
   useEffect(() => {
     const refresh = window.setTimeout(() => {
@@ -344,32 +341,41 @@ function App() {
     }, 0)
 
     return () => window.clearTimeout(refresh)
-  }, [adminToken, loadAdminData])
+  }, [loadAdminData])
 
   useEffect(() => {
-    if (!adminToken) {
+    if (!isAuthed) {
       return undefined
     }
 
     const refresh = window.setInterval(() => {
-      void loadAdminData(adminToken)
+      void loadAdminData()
     }, 5000)
 
     return () => window.clearInterval(refresh)
-  }, [adminToken, loadAdminData])
+  }, [isAuthed, loadAdminData])
 
-  const saveAdminToken = () => {
+  const saveAdminToken = async () => {
     const token = tokenInput.trim()
-    setAdminToken(token)
-    localStorage.setItem('face-admin-token', token)
+    if (!token) return
+
+    try {
+      await loginAdmin(token)
+      setTokenInput('')
+      setIsAuthed(true)
+      await loadAdminData()
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Ошибка доступа')
+      setIsAuthed(false)
+    }
   }
 
   const clearAdminToken = () => {
-    setAdminToken('')
+    void logoutAdmin().catch(() => undefined)
+    setIsAuthed(false)
     setTokenInput('')
     setCandidateRows(candidates)
     setAuditEvents([])
-    localStorage.removeItem('face-admin-token')
   }
 
   const updateLanguage = (nextLang: AdminLang) => {
@@ -377,7 +383,7 @@ function App() {
   }
 
   const updateCandidateDecision = async (decision: 'approve' | 'reject') => {
-    if (!adminToken) {
+    if (!isAuthed) {
       setAuthError(t.noAuth)
       return
     }
@@ -390,8 +396,8 @@ function App() {
     const request = decision === 'approve' ? approveCandidate : rejectCandidate
 
     try {
-      await request(activeCandidate.id, adminToken)
-      await loadAdminData(adminToken)
+      await request(activeCandidate.id)
+      await loadAdminData()
       setActionMessage(`${activeCandidate.id}: ${decision === 'approve' ? t.approve : t.reject}.`)
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : 'Ошибка')
@@ -399,11 +405,11 @@ function App() {
   }
 
   const exportCandidates = () => {
-    if (!adminToken) {
+    if (!isAuthed) {
       return
     }
 
-    window.location.href = getCandidateExportUrl(adminToken)
+    window.location.href = getCandidateExportUrl()
   }
 
   if (!isAuthed) {
@@ -622,7 +628,7 @@ function App() {
                     <img
                       alt={t.photo}
                       className="profilePhoto"
-                      src={getCandidateMediaUrl(activeCandidate.id, 'portraitPhoto', adminToken)}
+                      src={getCandidateMediaUrl(activeCandidate.id, 'portraitPhoto')}
                     />
                   ) : (
                     <div className="avatar">{activeCandidate.name.slice(0, 1)}</div>
@@ -646,37 +652,37 @@ function App() {
                     <div className="mediaGrid">
                       {activeCandidate.fullBodyPhotoPath ? (
                         <figure className="mediaTile">
-                          <img alt={t.fullBodyPhoto} src={getCandidateMediaUrl(activeCandidate.id, 'fullBodyPhoto', adminToken)} />
+                          <img alt={t.fullBodyPhoto} src={getCandidateMediaUrl(activeCandidate.id, 'fullBodyPhoto')} />
                           <figcaption>{t.fullBodyPhoto}</figcaption>
                         </figure>
                       ) : null}
                       {activeCandidate.closeShotPhotoPath ? (
                         <figure className="mediaTile">
-                          <img alt={t.closeShotPhoto} src={getCandidateMediaUrl(activeCandidate.id, 'closeShotPhoto', adminToken)} />
+                          <img alt={t.closeShotPhoto} src={getCandidateMediaUrl(activeCandidate.id, 'closeShotPhoto')} />
                           <figcaption>{t.closeShotPhoto}</figcaption>
                         </figure>
                       ) : null}
                       {activeCandidate.leftProfilePhotoPath ? (
                         <figure className="mediaTile">
-                          <img alt={t.leftProfilePhoto} src={getCandidateMediaUrl(activeCandidate.id, 'leftProfilePhoto', adminToken)} />
+                          <img alt={t.leftProfilePhoto} src={getCandidateMediaUrl(activeCandidate.id, 'leftProfilePhoto')} />
                           <figcaption>{t.leftProfilePhoto}</figcaption>
                         </figure>
                       ) : null}
                       {activeCandidate.rightProfilePhotoPath ? (
                         <figure className="mediaTile">
-                          <img alt={t.rightProfilePhoto} src={getCandidateMediaUrl(activeCandidate.id, 'rightProfilePhoto', adminToken)} />
+                          <img alt={t.rightProfilePhoto} src={getCandidateMediaUrl(activeCandidate.id, 'rightProfilePhoto')} />
                           <figcaption>{t.rightProfilePhoto}</figcaption>
                         </figure>
                       ) : null}
                       {activeCandidate.portraitPhotoPath || activeCandidate.photoPath ? (
                         <figure className="mediaTile">
-                          <img alt={t.photo} src={getCandidateMediaUrl(activeCandidate.id, 'portraitPhoto', adminToken)} />
+                          <img alt={t.photo} src={getCandidateMediaUrl(activeCandidate.id, 'portraitPhoto')} />
                           <figcaption>{t.photo}</figcaption>
                         </figure>
                       ) : null}
                       {activeCandidate.introVideoPath ? (
                         <figure className="mediaTile mediaVideo">
-                          <video controls preload="metadata" src={getCandidateMediaUrl(activeCandidate.id, 'introVideo', adminToken)} />
+                          <video controls preload="metadata" src={getCandidateMediaUrl(activeCandidate.id, 'introVideo')} />
                           <figcaption>{t.introVideo}</figcaption>
                         </figure>
                       ) : null}

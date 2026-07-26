@@ -18,13 +18,11 @@ Local:
 
 ```bash
 npm run server
-npm run bot
 ```
 
 Vercel:
 
 ```text
-No npm run bot
 Telegram webhook calls /api/telegram/webhook
 Bot sessions are stored in Supabase
 ```
@@ -99,19 +97,11 @@ This sets Telegram to send messages to:
 https://YOUR_APP.vercel.app/api/telegram/webhook
 ```
 
-## Disable Webhook For Local Polling
+## Migration Status
 
-If you want to go back to local `npm run bot`, first run:
-
-```bash
-npm run webhook:delete
-```
-
-Then start local bot:
-
-```bash
-npm run bot
-```
+This document is retained only for Vercel rollback reference. The active
+deployment target is Railway; follow [Railway Migration](./RAILWAY_MIGRATION.md).
+The bot is webhook-only, so do not switch it to local polling.
 
 ## Known Vercel Risks
 
