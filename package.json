@@ -17,7 +17,7 @@
     "normalize:taxonomy": "node scripts/normalize-candidate-taxonomy.js",
     "preview": "vite preview",
     "test:messaging": "node --test test/messaging-logic.test.js",
-    "test:telegram": "node --test test/messaging-logic.test.js test/message-lifecycle.test.js test/example-delivery.test.js test/example-media.test.js test/telegram-example-repository.test.js",
+    "test:telegram": "node --test test/messaging-logic.test.js test/message-lifecycle.test.js test/example-delivery.test.js test/example-media.test.js test/candidate-messaging-policy.test.js test/telegram-example-repository.test.js",
     "test:persistence-safety": "node scripts/test-persistence-safety.js",
     "webhook:delete": "node scripts/delete-telegram-webhook.js",
     "webhook:set": "node scripts/set-telegram-webhook.js"

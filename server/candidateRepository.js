@@ -301,8 +301,12 @@ export function hasRequiredCandidateConsent(candidate) {
   return ['candidate_confirmed', 'confirmed', 'not_required'].includes(consent)
 }
 
-export function isCandidateEligibleForMessaging(candidate) {
+export function isCandidateReachableForDirectMessage(candidate) {
   return Boolean(candidateMessagingChatId(candidate))
+}
+
+export function isCandidateEligibleForMessaging(candidate) {
+  return isCandidateReachableForDirectMessage(candidate)
     && ['approved', 'verified'].includes(candidate?.status)
     && hasRequiredCandidateConsent(candidate)
 }

@@ -12,6 +12,7 @@ import {
   findCandidate,
   getBroadcastDryRun,
   isCandidateEligibleForMessaging,
+  isCandidateReachableForDirectMessage,
   listCandidates,
   updateCandidateMetadata,
   updateCandidateStatus,
@@ -2058,15 +2059,8 @@ export async function routeRequest(request, response) {
       return
     }
 
-    const targetChatId = candidateMessagingChatId(candidate)
-
-    if (!targetChatId) {
+    if (!isCandidateReachableForDirectMessage(candidate)) {
       sendJson(response, 400, { error: 'У кандидата не найден Telegram ID для отправки сообщения' })
-      return
-    }
-
-    if (!isCandidateEligibleForMessaging(candidate)) {
-      sendJson(response, 409, { error: 'Candidate is not approved and consent-verified for messaging' })
       return
     }
 
