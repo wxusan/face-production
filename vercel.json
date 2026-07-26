@@ -1,34 +1,25 @@
 {
-  "buildCommand": "echo 'Admin portal is served by the Node API; no Vite build required.'",
-  "functions": {
-    "api/**/*.js": {
-      "maxDuration": 60
-    }
-  },
+  "buildCommand": "echo 'FACE portal is served by Railway through Vercel rewrites.'",
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "/api?__path=/api/:path*"
-    },
-    {
-      "source": "/",
-      "destination": "/api"
-    },
-    {
-      "source": "/assets/:path*",
-      "destination": "/api?__path=/api/assets/:path*"
-    },
-    {
-      "source": "/favicon.svg",
-      "destination": "/api?__path=/api/favicon.svg"
-    },
-    {
-      "source": "/icons.svg",
-      "destination": "/api?__path=/api/icons.svg"
+      "destination": "https://face-production-staging.up.railway.app/api/:path*"
     },
     {
       "source": "/candidate-profile/:path*",
-      "destination": "/api?__path=/api/candidate-profile/:path*"
+      "destination": "https://face-production-staging.up.railway.app/candidate-profile/:path*"
+    },
+    {
+      "source": "/assets/:path*",
+      "destination": "https://face-production-staging.up.railway.app/assets/:path*"
+    },
+    {
+      "source": "/",
+      "destination": "https://face-production-staging.up.railway.app/"
+    },
+    {
+      "source": "/:path*",
+      "destination": "https://face-production-staging.up.railway.app/:path*"
     }
   ]
 }
