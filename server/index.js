@@ -602,11 +602,12 @@ function candidateAdminHtml() {
           forFriend: 'За друга', found: 'Найдено', foundShort: 'Найдено:', fullBodyPhoto: 'Полный рост',
           gender: 'Пол', hasTelegram: 'Telegram', height: 'Рост', heightFrom: 'Рост от', heightTo: 'Рост до',
           hide: 'Скрыть', introVideo: 'Видео', languages: 'Языки', leftProfile: 'Левый профиль',
-          listByFilters: 'Список формируется фильтрами выше', login: 'Войти', logout: 'Выйти',
+          login: 'Войти', logout: 'Выйти',
           media: 'Медиа', messagePlaceholder: 'Написать кандидату или отправителю анкеты',
           messageRecipients: 'Получатели', messageSelected: 'Сообщение выбранным',
           messageTelegram: 'Сообщение в Telegram', messageText: 'Текст сообщения', newCasting: 'Новый кастинг',
-          noMedia: 'Медиа не загружено', noRecipients: 'Нет кандидатов по текущему фильтру',
+          noApplications: 'Нет заявок на проверку', noMedia: 'Медиа не загружено',
+          noRecipients: 'Нет одобренных кандидатов',
           noResults: 'Нет кандидатов по текущим фильтрам', noTelegram: 'Нет Telegram',
           confirmCandidateConsent: 'Подтвердить согласие кандидата', confirmGuardianConsent: 'Подтвердить согласие опекуна',
           consentPending: 'Нужно вручную подтвердить согласие перед одобрением.',
@@ -616,9 +617,10 @@ function candidateAdminHtml() {
           postsOnly: 'Посты отправляются только одобренным кандидатам.', postsPage: 'Посты',
           ratingLabel: 'Рейтинг заявки', rating: 'Рейтинг', refresh: 'Обновить',
           regularPost: 'Обычный пост', reject: 'Отклонить', rejected: 'Отклонен',
-          resultNote_others: 'Результаты сортируются по рейтингу', resultNote_posts: 'Выбор получателей ниже',
+          recipientsAllApproved: 'Ниже показаны все одобренные кандидаты',
+          resultNote_others: 'Результаты сортируются по рейтингу',
           rightProfile: 'Правый профиль', saveRating: 'Сохранить рейтинг',
-          search: 'Поиск: имя, телефон, Telegram, ID', selectFiltered: 'Выбрать найденных',
+          search: 'Поиск: имя, телефон, Telegram, ID', selectAll: 'Выбрать всех',
           selected: 'Выбрано', selectedShort: 'Выбрано:', send: 'Отправить', sendPost: 'Отправить пост',
           show: 'Показать', source: 'Источник', sports: 'Спорт', status: 'Статус',
           telegramCandidate: 'Telegram кандидата', title: 'Консоль MVP', type: 'Тип анкеты',
@@ -640,12 +642,12 @@ function candidateAdminHtml() {
           found: 'Topildi', foundShort: 'Topildi:', fullBodyPhoto: "To'liq bo'y",
           gender: 'Jins', hasTelegram: 'Telegram', height: "Bo'y", heightFrom: "Bo'y dan",
           heightTo: "Bo'y gacha", hide: 'Yashirish', introVideo: 'Video', languages: 'Tillar',
-          leftProfile: 'Chap profil', listByFilters: "Ro'yxat yuqoridagi filtrlar bilan shakllantiriladi",
-          login: 'Kirish', logout: 'Chiqish', media: 'Media',
+          leftProfile: 'Chap profil', login: 'Kirish', logout: 'Chiqish', media: 'Media',
           messagePlaceholder: "Nomzodga yoki ariza yuboruvchiga yozing",
           messageRecipients: "Qabul qiluvchilar", messageSelected: "Tanlanganlarga xabar",
           messageTelegram: 'Telegram xabar', messageText: 'Xabar matni', newCasting: 'Yangi kasting',
-          noMedia: 'Media yuklanmagan', noRecipients: "Joriy filtrga mos nomzodlar yo'q",
+          noApplications: "Tekshirish uchun arizalar yo'q", noMedia: 'Media yuklanmagan',
+          noRecipients: "Tasdiqlangan nomzodlar yo'q",
           noResults: "Joriy filtrlarga mos nomzodlar yo'q", noTelegram: "Telegram yo'q",
           confirmCandidateConsent: 'Nomzod roziligini tasdiqlash', confirmGuardianConsent: 'Vasiy roziligini tasdiqlash',
           consentPending: 'Tasdiqlashdan oldin rozilikni qo‘lda tekshiring.',
@@ -655,10 +657,10 @@ function candidateAdminHtml() {
           postsOnly: "Postlar faqat tasdiqlangan nomzodlarga yuboriladi.", postsPage: 'Postlar',
           ratingLabel: 'Ariza reytingi', rating: 'Reyting', refresh: 'Yangilash',
           regularPost: 'Oddiy post', reject: 'Rad etish', rejected: 'Rad etildi',
-          resultNote_others: "Natijalar reyting bo'yicha saralanadi",
-          resultNote_posts: "Qabul qiluvchilar pastda tanlang", rightProfile: "O'ng profil",
+          recipientsAllApproved: "Quyida barcha tasdiqlangan nomzodlar ko'rsatilgan",
+          resultNote_others: "Natijalar reyting bo'yicha saralanadi", rightProfile: "O'ng profil",
           saveRating: 'Reytingni saqlash', search: "Qidirish: ism, telefon, Telegram, ID",
-          selectFiltered: "Topilganlarni tanlash", selected: 'Tanlangan', selectedShort: 'Tanlangan:',
+          selectAll: "Barchasini tanlash", selected: 'Tanlangan', selectedShort: 'Tanlangan:',
           send: 'Yuborish', sendPost: 'Post yuborish', show: "Ko'rsatish", source: 'Manba',
           sports: 'Sport', status: 'Holat', telegramCandidate: 'Nomzod Telegram', title: 'MVP konsoli',
           type: 'Ariza turi', updatedAt: 'Yangilangan', updatedFrom: "Yangilangan dan",
@@ -678,12 +680,12 @@ function candidateAdminHtml() {
           forFriend: 'For a friend', found: 'Found', foundShort: 'Found:', fullBodyPhoto: 'Full body',
           gender: 'Gender', hasTelegram: 'Telegram', height: 'Height', heightFrom: 'Height from',
           heightTo: 'Height to', hide: 'Hide', introVideo: 'Video', languages: 'Languages',
-          leftProfile: 'Left profile', listByFilters: 'List is formed by the filters above',
-          login: 'Login', logout: 'Logout', media: 'Media',
+          leftProfile: 'Left profile', login: 'Login', logout: 'Logout', media: 'Media',
           messagePlaceholder: 'Write to candidate or application submitter',
           messageRecipients: 'Recipients', messageSelected: 'Message to selected',
           messageTelegram: 'Telegram message', messageText: 'Message text', newCasting: 'New casting',
-          noMedia: 'No media uploaded', noRecipients: 'No candidates match the current filter',
+          noApplications: 'No applications awaiting review', noMedia: 'No media uploaded',
+          noRecipients: 'No approved candidates available',
           noResults: 'No candidates match current filters', noTelegram: 'No Telegram',
           confirmCandidateConsent: 'Confirm candidate consent', confirmGuardianConsent: 'Confirm guardian consent',
           consentPending: 'Manually verify consent before approval.',
@@ -693,9 +695,10 @@ function candidateAdminHtml() {
           postsOnly: 'Posts are sent to approved candidates only.', postsPage: 'Posts',
           ratingLabel: 'Application rating', rating: 'Rating', refresh: 'Refresh',
           regularPost: 'Regular post', reject: 'Reject', rejected: 'Rejected',
-          resultNote_others: 'Results sorted by rating', resultNote_posts: 'Select recipients below',
+          recipientsAllApproved: 'All approved candidates are listed below',
+          resultNote_others: 'Results sorted by rating',
           rightProfile: 'Right profile', saveRating: 'Save rating',
-          search: 'Search: name, phone, Telegram, ID', selectFiltered: 'Select filtered',
+          search: 'Search: name, phone, Telegram, ID', selectAll: 'Select all',
           selected: 'Selected', selectedShort: 'Selected:', send: 'Send', sendPost: 'Send post',
           show: 'Show', source: 'Source', sports: 'Sports', status: 'Status',
           telegramCandidate: 'Candidate Telegram', title: 'MVP Console', type: 'Application type',
@@ -907,33 +910,41 @@ function candidateAdminHtml() {
           '</div>';
       }
       function applyFilters() {
-        var q = filters.q.trim().toLowerCase();
-        filtered = pageBaseCandidates().filter(function (candidate) {
-          var haystack = [
-            candidate.id, candidate.name, candidate.phone, candidate.telegramUsername, candidate.telegramUserId
-          ].map(norm).join(' ');
-          if (q && !haystack.includes(q)) return false;
-          if (filters.status.length && !filters.status.includes(candidate.status)) return false;
-          if (filters.city.length && !filters.city.includes(candidate.city)) return false;
-          if (filters.gender.length && !filters.gender.includes(candidate.gender)) return false;
-          if (filters.source.length && !filters.source.includes(candidate.source)) return false;
-          if (!matchesRange(candidate.age, filters.ageMin, filters.ageMax)) return false;
-          if (!matchesRange(candidate.height, filters.heightMin, filters.heightMax)) return false;
-          if (!matchesRange(candidate.weight, filters.weightMin, filters.weightMax)) return false;
-          if (!matchesDate(candidate.createdAt, filters.createdFrom, filters.createdTo)) return false;
-          if (!matchesDate(candidate.updatedAt, filters.updatedFrom, filters.updatedTo)) return false;
-          if (!matchesAny(candidate.performanceTalents, filters.performance)) return false;
-          if (!matchesAny(candidate.sportsTalents, filters.sports)) return false;
-          if (!matchesAny(candidate.physicalSkills, filters.physical)) return false;
-          if (!matchesAny(candidate.languageSkills, filters.languages)) return false;
-          if (!matchesAny(candidate.appearance, filters.appearance)) return false;
-          for (var key in filters.media) {
-            if (filters.media[key] && !hasCandidateMedia(candidate, key)) return false;
-          }
-          return true;
-        }).sort(function (a, b) {
-          return ratingValue(b) - ratingValue(a) || String(a.name || '').localeCompare(String(b.name || ''));
-        });
+        var baseCandidates = pageBaseCandidates();
+
+        if (activePage !== 'candidates') {
+          filtered = baseCandidates.sort(function (a, b) {
+            return ratingValue(b) - ratingValue(a) || String(a.name || '').localeCompare(String(b.name || ''));
+          });
+        } else {
+          var q = filters.q.trim().toLowerCase();
+          filtered = baseCandidates.filter(function (candidate) {
+            var haystack = [
+              candidate.id, candidate.name, candidate.phone, candidate.telegramUsername, candidate.telegramUserId
+            ].map(norm).join(' ');
+            if (q && !haystack.includes(q)) return false;
+            if (filters.status.length && !filters.status.includes(candidate.status)) return false;
+            if (filters.city.length && !filters.city.includes(candidate.city)) return false;
+            if (filters.gender.length && !filters.gender.includes(candidate.gender)) return false;
+            if (filters.source.length && !filters.source.includes(candidate.source)) return false;
+            if (!matchesRange(candidate.age, filters.ageMin, filters.ageMax)) return false;
+            if (!matchesRange(candidate.height, filters.heightMin, filters.heightMax)) return false;
+            if (!matchesRange(candidate.weight, filters.weightMin, filters.weightMax)) return false;
+            if (!matchesDate(candidate.createdAt, filters.createdFrom, filters.createdTo)) return false;
+            if (!matchesDate(candidate.updatedAt, filters.updatedFrom, filters.updatedTo)) return false;
+            if (!matchesAny(candidate.performanceTalents, filters.performance)) return false;
+            if (!matchesAny(candidate.sportsTalents, filters.sports)) return false;
+            if (!matchesAny(candidate.physicalSkills, filters.physical)) return false;
+            if (!matchesAny(candidate.languageSkills, filters.languages)) return false;
+            if (!matchesAny(candidate.appearance, filters.appearance)) return false;
+            for (var key in filters.media) {
+              if (filters.media[key] && !hasCandidateMedia(candidate, key)) return false;
+            }
+            return true;
+          }).sort(function (a, b) {
+            return ratingValue(b) - ratingValue(a) || String(a.name || '').localeCompare(String(b.name || ''));
+          });
+        }
         if (!filtered.some(function (candidate) { return candidate.id === selectedId; })) selectedId = '';
         if (selectionMode === 'auto') {
           selectedIds = filtered.map(function (candidate) { return candidate.id; });
@@ -1027,7 +1038,6 @@ function candidateAdminHtml() {
         var cityOptions = optionValues('city');
         var genderOptions = optionValues('gender');
         var sourceOptions = optionValues('source');
-        var resultNote = activePage === 'posts' ? t('resultNote_posts') : t('resultNote_others');
         var mainBody = '<div class="filterGrid">' +
           choiceGroup('city', t('city'), cityOptions, filters.city) +
           choiceGroup('gender', t('gender'), genderOptions, filters.gender) +
@@ -1052,7 +1062,7 @@ function candidateAdminHtml() {
           renderFilterSection('additional', t('filter_additional'), additionalBody) +
           renderFilterSection('talents', t('filter_talents'), talentsBody) +
           renderFilterSection('media', t('filter_media'), mediaFilterButtons()) +
-          '<div class="actions"><button class="secondary" id="clearFilters">' + t('clearFilters') + '</button><strong>' + t('found') + ': ' + filtered.length + ' / ' + pageTotalCount() + '</strong><span class="muted">' + resultNote + '</span></div></section>';
+          '<div class="actions"><button class="secondary" id="clearFilters">' + t('clearFilters') + '</button><strong>' + t('found') + ': ' + filtered.length + ' / ' + pageTotalCount() + '</strong><span class="muted">' + t('resultNote_others') + '</span></div></section>';
       }
       function renderFilterSection(id, title, body) {
         return '<div class="filterSection"><button type="button" class="filterToggle" data-filter-toggle="' + id + '">' + esc(title) + '<span>' + (filterSections[id] ? t('hide') : t('show')) + '</span></button>' +
@@ -1080,7 +1090,7 @@ function candidateAdminHtml() {
         var sendDisabled = selected.length ? '' : ' disabled';
         return '<section class="postPage">' +
           '<section class="postPanel"><div class="sectionHeader"><div><p class="muted">' + t('postsOnly') + '</p><h3>' + t('messageRecipients') + '</h3></div><div class="statRow"><span class="statPill">' + t('foundShort') + ' ' + filtered.length + '</span><span class="statPill">' + t('selectedShort') + ' ' + selected.length + '</span><span class="statPill">Telegram: ' + selectedTelegram + ' / ' + foundTelegram + '</span></div></div>' +
-          '<div class="recipientToolbar"><span class="muted">' + t('listByFilters') + '</span><div class="actions"><button class="secondary" id="selectFiltered">' + t('selectFiltered') + '</button><button class="secondary" id="clearSelected">' + t('deselect') + '</button></div></div>' +
+          '<div class="recipientToolbar"><span class="muted">' + t('recipientsAllApproved') + '</span><div class="actions"><button class="secondary" id="selectAllRecipients">' + t('selectAll') + '</button><button class="secondary" id="clearSelected">' + t('deselect') + '</button></div></div>' +
           renderRecipientList() + '</section>' +
           '<section class="postGrid">' +
           '<div class="postCard"><div><p class="filterLabel">' + t('regularPost') + '</p><h3>' + t('messageSelected') + '</h3></div><textarea id="bulkText" placeholder="' + t('messageText') + '">' + esc(postDraft.bulkText) + '</textarea><div class="actions"><button class="primary" id="sendBulk"' + sendDisabled + '>' + t('sendPost') + '</button><span class="muted" id="bulkResult"></span></div></div>' +
@@ -1130,7 +1140,7 @@ function candidateAdminHtml() {
         };
       }
       function renderTable() {
-        if (!filtered.length) return '<section class="panel empty">' + t('noResults') + '</section>';
+        if (!filtered.length) return '<section class="panel empty">' + t(activePage === 'pending' ? 'noApplications' : 'noResults') + '</section>';
         return '<section class="panel"><table><thead><tr><th>' + t('candidate') + '</th><th>' + t('city') + '</th><th>' + t('gender') + '</th><th>' + t('age') + '</th><th>' + t('rating') + '</th><th>' + t('status') + '</th></tr></thead><tbody>' +
           filtered.map(function (candidate) {
             return '<tr data-id="' + esc(candidate.id) + '" class="' + (candidate.id === selectedId ? 'selected' : '') + '"><td><strong>' + esc(candidate.name || '-') + '</strong><span>' + esc(candidate.id) + ' · ' + esc(candidate.phone || '') + '</span></td><td>' + esc(candidate.city || '-') + '</td><td>' + esc(candidate.gender || '-') + '</td><td>' + esc(candidate.age || '-') + '</td><td><strong>' + ratingValue(candidate).toFixed(2) + '</strong><span>' + starText(ratingValue(candidate)) + '</span></td><td><span class="status ' + statusClass(candidate.status) + '">' + statusLabel(candidate.status) + '</span></td></tr>';
@@ -1284,7 +1294,7 @@ function candidateAdminHtml() {
         };
       }
       function bindMessagingPanel() {
-        var selectFiltered = document.getElementById('selectFiltered');
+        var selectAllRecipients = document.getElementById('selectAllRecipients');
         var clearSelected = document.getElementById('clearSelected');
         var sendBulk = document.getElementById('sendBulk');
         var sendCasting = document.getElementById('sendCasting');
@@ -1308,7 +1318,7 @@ function candidateAdminHtml() {
             touchInteraction();
           };
         });
-        if (selectFiltered) selectFiltered.onclick = function () { selectionMode = 'manual'; selectedIds = filtered.map(function (candidate) { return candidate.id; }); deliveryOperations.bulk = ''; deliveryOperations.casting = ''; renderApp(); };
+        if (selectAllRecipients) selectAllRecipients.onclick = function () { selectionMode = 'manual'; selectedIds = filtered.map(function (candidate) { return candidate.id; }); deliveryOperations.bulk = ''; deliveryOperations.casting = ''; renderApp(); };
         if (clearSelected) clearSelected.onclick = function () { selectionMode = 'manual'; selectedIds = []; deliveryOperations.bulk = ''; deliveryOperations.casting = ''; renderApp(); };
         if (sendBulk) sendBulk.onclick = async function () {
           var output = document.getElementById('bulkResult');
@@ -1384,17 +1394,16 @@ function candidateAdminHtml() {
         var isCandidates = activePage === 'candidates';
         var pageTitle = isPosts ? t('postsPage') : isPending ? t('pendingPage') : t('candidatesPage');
         var body = isPosts
-          ? renderFilters() + renderPostsPage()
-          : renderFilters() + '<section class="layout">' + renderTable() + renderDetail() + '</section>';
+          ? renderPostsPage()
+          : (isCandidates ? renderFilters() : '') + '<section class="layout">' + renderTable() + renderDetail() + '</section>';
         var exportAction = isCandidates ? '<button class="secondary" id="export">' + t('export') + '</button>' : '';
         var langBtns = ['ru','uz','en'].map(function(l) { return '<button type="button" class="langBtn' + (lang === l ? ' active' : '') + '" data-lang="' + l + '">' + l.toUpperCase() + '</button>'; }).join('');
         root.innerHTML = '<main class="app"><aside class="sidebar"><div class="brand">' + (logoDataUri ? '<img class="logoMark" src="' + logoDataUri + '" alt="FACE Production">' : '<div class="mark">FP</div>') + '<div><strong>FACE Production</strong><p class="muted">' + t('brand') + '</p></div></div><button class="nav ' + (isPending ? 'active' : '') + '" data-page="pending">' + t('pendingPage') + '</button><button class="nav ' + (isCandidates ? 'active' : '') + '" data-page="candidates">' + t('candidatesPage') + '</button><button class="nav ' + (isPosts ? 'active' : '') + '" data-page="posts">' + t('postsPage') + '</button><div class="langRow">' + langBtns + '</div></aside><section class="workspace"><header class="topbar"><div><p class="muted">' + t('title') + '</p><h2>' + pageTitle + '</h2></div><div class="actions"><button class="secondary" id="refresh">' + t('refresh') + '</button>' + exportAction + '<button class="secondary" id="logout">' + t('logout') + '</button></div></header>' + body + '</section></main>';
         bindNavigation();
         if (isPosts) {
-          bindFilters();
           bindMessagingPanel();
         } else {
-          bindFilters();
+          if (isCandidates) bindFilters();
           bindTableAndDetail();
         }
         document.getElementById('refresh').onclick = load;
