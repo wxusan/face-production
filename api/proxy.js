@@ -1,4 +1,5 @@
 import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 
 const RAILWAY_ORIGIN = 'https://face-production-staging.up.railway.app'
 const REQUEST_HEADERS_TO_SKIP = new Set([
@@ -67,11 +68,28 @@ function copyResponseHeaders(upstream, response) {
 }
 
 export default async function handler(request, response) {
-  const upstream = await fetch(getUpstreamPath(request), {
-    body: getUpstreamBody(request),
-    headers: getUpstreamHeaders(request),
+  const upstreamPath = getUpstreamPath(request)
+  const upstreamBody = getUpstreamBody(request)
+  const upstreamHeaders = getUpstreamHeaders(request)
+
+  console.info('FACE API proxy request', {
+    hasAdminHeader: upstreamHeaders.has('x-face-admin-token'),
+    hasBody: upstreamBody !== undefined,
+    method: request.method,
+    path: upstreamPath.pathname,
+  })
+
+  const upstream = await fetch(upstreamPath, {
+    body: upstreamBody,
+    headers: upstreamHeaders,
     method: request.method,
     redirect: 'manual',
+  })
+
+  console.info('FACE API proxy response', {
+    method: request.method,
+    path: upstreamPath.pathname,
+    status: upstream.status,
   })
 
   response.statusCode = upstream.status
@@ -82,5 +100,5 @@ export default async function handler(request, response) {
     return
   }
 
-  Readable.fromWeb(upstream.body).pipe(response)
+  await pipeline(Readable.fromWeb(upstream.body), response)
 }
