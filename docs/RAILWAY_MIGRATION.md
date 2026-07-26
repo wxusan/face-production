@@ -37,6 +37,7 @@ the Git repository or in client-side code.
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | BotFather token for the production bot |
 | `TELEGRAM_WEBHOOK_SECRET` | New random 32-byte secret; used both by Railway and Telegram's webhook |
+| `TELEGRAM_DISABLED` | Optional staging-only switch. Set to `true` to run the portal before a separate staging bot is connected |
 | `TELEGRAM_ADMIN_ID` | Comma-separated numeric Telegram IDs for administrators |
 | `ADMIN_WEB_TOKEN` | New random 32-byte admin portal secret |
 | `DATABASE_URL` | Supabase PostgreSQL Session Pooler connection string |
@@ -67,6 +68,7 @@ ADMIN_WEB_TOKEN=<new random secret>
 TELEGRAM_ADMIN_ID=<numeric Telegram ID or comma-separated IDs>
 TELEGRAM_BOT_TOKEN=<BotFather token>
 TELEGRAM_WEBHOOK_SECRET=<new random secret>
+TELEGRAM_DISABLED=false
 TELEGRAM_ENABLE_POLLING=false
 DATABASE_URL=<Supabase Session Pooler URL>
 PGSSLMODE=require
@@ -83,6 +85,10 @@ PUBLIC_APP_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
 
 Do not set `PORT`: Railway supplies it. Do not use `SERVER_PORT` in Railway.
 Do not set `TELEGRAM_ENABLE_POLLING=true`; polling is not supported.
+
+For an isolated staging portal, omit `TELEGRAM_BOT_TOKEN` and set
+`TELEGRAM_DISABLED=true`. Change it to `false` only after adding the staging bot
+token and before registering that bot's webhook.
 
 ## Deploy and Verify Before Cutover
 

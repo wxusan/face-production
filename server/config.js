@@ -31,6 +31,7 @@ export const config = {
   isHostedRuntime: Boolean(process.env.RAILWAY_SERVICE_ID || process.env.VERCEL),
   port: parsePort(process.env.PORT ?? process.env.SERVER_PORT, 8787),
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? '',
+  telegramDisabled: process.env.TELEGRAM_DISABLED === 'true',
   telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET ?? '',
 }
 
@@ -43,8 +44,10 @@ export function getHostedConfigurationProblems() {
 
   if (!config.adminWebToken) problems.push('ADMIN_WEB_TOKEN is required')
   if (!config.adminIds.length) problems.push('TELEGRAM_ADMIN_ID is required')
-  if (!config.telegramBotToken) problems.push('TELEGRAM_BOT_TOKEN is required')
-  if (!config.telegramWebhookSecret) problems.push('TELEGRAM_WEBHOOK_SECRET is required')
+  if (!config.telegramDisabled) {
+    if (!config.telegramBotToken) problems.push('TELEGRAM_BOT_TOKEN is required')
+    if (!config.telegramWebhookSecret) problems.push('TELEGRAM_WEBHOOK_SECRET is required')
+  }
   if (process.env.TELEGRAM_ENABLE_POLLING === 'true') {
     problems.push('TELEGRAM_ENABLE_POLLING=true is not supported; deploy the webhook service only')
   }
@@ -75,6 +78,7 @@ export function getConfigStatus() {
     ready: configurationProblems.length === 0,
     webAuthConfigured: Boolean(config.adminWebToken),
     telegramConfigured: Boolean(config.telegramBotToken),
+    telegramDisabled: config.telegramDisabled,
     webhookSecretConfigured: Boolean(config.telegramWebhookSecret),
     configurationProblems,
   }
