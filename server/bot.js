@@ -11,6 +11,7 @@ import {
   updateCandidateMetadata,
   updateCandidateStatus,
 } from './candidateRepository.js'
+import { candidateDecisionMessage } from './candidateDecisionMessages.js'
 import { listApprovedCustomValues } from './profileManagementRepository.js'
 import { getRequiredExampleMedia } from './exampleMedia.js'
 import {
@@ -1752,25 +1753,10 @@ async function handleAdminDecisionCallback(query) {
   })
 
   if (updated.telegramChatId || updated.submittedByTelegramChatId) {
-    const userLang = updated.language && text[updated.language] ? updated.language : 'ru'
-    const message =
-      nextStatus === 'approved'
-        ? updated.submissionMode === 'friend'
-          ? text[userLang].proxyApproved
-          : {
-              en: 'Your FACE Production profile was approved for the internal talent database.',
-              ru: 'Ваш профиль FACE Production одобрен для внутренней базы талантов.',
-              uz: 'FACE Production profilingiz ichki talentlar bazasi uchun tasdiqlandi.',
-            }[userLang]
-        : updated.submissionMode === 'friend'
-          ? text[userLang].proxyRejected
-          : {
-              en: 'Your FACE Production registration was reviewed and not approved at this stage.',
-              ru: 'Ваша заявка FACE Production рассмотрена и не одобрена на этом этапе.',
-              uz: 'FACE Production arizangiz ko‘rib chiqildi va bu bosqichda tasdiqlanmadi.',
-            }[userLang]
-
-    await send(updated.telegramChatId ?? updated.submittedByTelegramChatId, message)
+    await send(
+      updated.telegramChatId ?? updated.submittedByTelegramChatId,
+      candidateDecisionMessage(updated, nextStatus),
+    )
   }
 
   await editMessage(

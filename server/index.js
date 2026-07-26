@@ -17,6 +17,7 @@ import {
   updateCandidateMetadata,
   updateCandidateStatus,
 } from './candidateRepository.js'
+import { candidateDecisionMessage } from './candidateDecisionMessages.js'
 import {
   assignCandidateLabel,
   createCandidateComment,
@@ -2529,13 +2530,7 @@ export async function routeRequest(request, response) {
 
     const approvalChatId = candidate.telegramChatId ?? candidate.submittedByTelegramChatId ?? candidate.telegramUserId ?? candidate.submittedByTelegramUserId
     if (approvalChatId) {
-      const message = candidate.submissionMode === 'friend'
-        ? nextStatus === 'approved'
-          ? 'Анкета, которую вы отправили за друга, одобрена для внутренней базы талантов FACE Production.'
-          : 'Анкета, которую вы отправили за друга, рассмотрена и не одобрена на этом этапе.'
-        : nextStatus === 'approved'
-          ? 'Ваш профиль FACE Production одобрен для внутренней кастинг-базы.'
-          : 'Ваша заявка FACE Production рассмотрена и не одобрена на этом этапе.'
+      const message = candidateDecisionMessage(candidate, nextStatus)
 
       const decisionClaim = await claimTelegramDelivery({
         chatId: approvalChatId,
