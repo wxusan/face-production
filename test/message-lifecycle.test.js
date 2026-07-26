@@ -13,6 +13,7 @@ delete process.env.OBJECT_STORAGE_SECRET_ACCESS_KEY
 
 const calls = []
 let nextMessageId = 700
+let rejectGetFileAsTooLarge = false
 const savedPhotoPath = resolve(process.cwd(), 'var/candidate-media/photos/lifecycle-photo.jpg')
 const savedVideoPath = resolve(process.cwd(), 'var/candidate-media/videos/lifecycle-video.mp4')
 
@@ -54,6 +55,17 @@ globalThis.fetch = async (url, options = {}) => {
       video: { file_id: 'review-video-file-id' },
     }
   } else if (method === 'getFile') {
+    if (rejectGetFileAsTooLarge) {
+      calls.push({ method, payload })
+      return new Response(JSON.stringify({
+        description: 'Bad Request: file is too big',
+        error_code: 400,
+        ok: false,
+      }), {
+        headers: { 'content-type': 'application/json' },
+        status: 400,
+      })
+    }
     result = {
       file_path: payload.file_id === 'candidate-video-file-id'
         ? 'videos/lifecycle-video.mp4'
@@ -105,6 +117,7 @@ function apiCalls(method) {
 beforeEach(() => {
   calls.length = 0
   nextMessageId = 700
+  rejectGetFileAsTooLarge = false
   __botTesting.resetRuntimeState()
 })
 
@@ -311,4 +324,92 @@ test('submitting a candidate video deletes only its temporary example and keeps 
   assert.equal(session.data.introVideoPath, savedVideoPath)
   assert.equal(session.step, 'preview')
   assert.equal(session.temporaryExampleMessageIds.length, 0)
+})
+
+test('oversized videos receive a localized warning, remain on the video step, and are not downloaded', async (t) => {
+  const cases = [
+    ['en', /maximum supported size is 20 MB/],
+    ['ru', /Максимальный поддерживаемый размер — 20 MB/],
+    ['uz', /maksimal hajm — 20 MB/],
+  ]
+
+  for (const [index, [lang, warningPattern]] of cases.entries()) {
+    await t.test(lang, async () => {
+      calls.length = 0
+      __botTesting.resetRuntimeState()
+      const userId = 920100 + index
+      const updateId = 100 + index
+
+      __botTesting.setSession(userId, {
+        chatId: userId,
+        data: {
+          genderCode: 'male',
+          telegramUserId: String(userId),
+        },
+        editing: false,
+        flowId: `oversized-video-${lang}`,
+        inlinePromptMessageIds: [],
+        lang,
+        previewMessageIds: [],
+        promptMessageIds: [980 + index],
+        proxy: false,
+        step: 'video',
+        temporaryExampleMessageIds: [970 + index],
+      })
+
+      const result = await handleBotUpdate(messageUpdate(updateId, userId, {
+        video: {
+          duration: 45,
+          file_id: `oversized-video-${lang}`,
+          file_size: 126 * 1024 * 1024,
+          file_unique_id: `oversized-video-${lang}`,
+        },
+      }))
+
+      assert.equal(result.handled, true)
+      assert.equal(apiCalls('getFile').length, 0)
+      assert.match(apiCalls('sendMessage').at(-1).payload.text, warningPattern)
+
+      const session = __botTesting.sessionFor(userId)
+      assert.equal(session.step, 'video')
+      assert.equal(session.data.introVideoPath, undefined)
+      assert.deepEqual(session.temporaryExampleMessageIds, [970 + index])
+      assert.equal(session.lastAppliedUpdateId, updateId)
+    })
+  }
+})
+
+test('Telegram file-too-big errors become a warning instead of failing the webhook', async () => {
+  const userId = 920200
+  rejectGetFileAsTooLarge = true
+  __botTesting.setSession(userId, {
+    chatId: userId,
+    data: {
+      genderCode: 'female',
+      telegramUserId: String(userId),
+    },
+    editing: false,
+    flowId: 'telegram-too-big-fallback',
+    inlinePromptMessageIds: [],
+    lang: 'uz',
+    previewMessageIds: [],
+    promptMessageIds: [990],
+    proxy: false,
+    step: 'video',
+    temporaryExampleMessageIds: [989],
+  })
+
+  const result = await handleBotUpdate(messageUpdate(200, userId, {
+    video: {
+      duration: 45,
+      file_id: 'telegram-too-big-fallback',
+      file_unique_id: 'telegram-too-big-fallback',
+    },
+  }))
+
+  assert.equal(result.handled, true)
+  assert.equal(apiCalls('getFile').length, 1)
+  assert.match(apiCalls('sendMessage').at(-1).payload.text, /maksimal hajm — 20 MB/)
+  assert.equal(__botTesting.sessionFor(userId).step, 'video')
+  assert.equal(__botTesting.sessionFor(userId).lastAppliedUpdateId, 200)
 })

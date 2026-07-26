@@ -12,7 +12,12 @@ import {
   updateCandidateStatus,
 } from './candidateRepository.js'
 import { getRequiredExampleMedia } from './exampleMedia.js'
-import { readMediaReference, saveTelegramFile } from './photoStorage.js'
+import {
+  isWithinTelegramFileLimit,
+  MAX_TELEGRAM_FILE_BYTES,
+  readMediaReference,
+  saveTelegramFile,
+} from './photoStorage.js'
 import { talentLabel, talentTaxonomy } from './taxonomy.js'
 import { callTelegramApi } from './telegramApi.js'
 import {
@@ -72,14 +77,14 @@ const text = {
     askPortraitPhoto: 'Send a portrait photo:',
     askRightProfilePhoto: 'Send a right profile side photo:',
     askVideo:
-      'Send intro video. Max 90 seconds (1:30). Say your name, age, city, talents, then show happiness, anger, sadness, surprise, excitement, and fear.',
+      'Send intro video. Max 90 seconds (1:30) and 20 MB. Say your name, age, city, talents, then show happiness, anger, sadness, surprise, excitement, and fear.',
     askWeight: 'Weight:',
     badAge: 'Age must be digits only and not more than 130.',
     badHeight: 'Height must be digits only and not more than 250.',
     badName: 'Full name must contain only letters and spaces. Example: Abdukarim Salomov',
     badPhone: 'Please use the phone button or send a valid phone number.',
     badPhoto: 'Please send a photo.',
-    badVideo: 'Please send a video up to 90 seconds (1:30).',
+    badVideo: 'Please send a video up to 90 seconds (1:30) and 20 MB.',
     badWeight: 'Weight must be digits only.',
     cancel: 'Registration cancelled. Send /start to begin again.',
     castingList: 'Current castings:',
@@ -122,6 +127,8 @@ const text = {
     unexpected: 'Please answer the current question using the requested format.',
     useButtons: 'Please use the buttons on the current message.',
     unknownAdmin: 'Unknown admin command. Send /help.',
+    videoTooLarge:
+      '⚠️ This video is too large. The maximum supported size is {maxFileSize}. Please compress or reduce the video and send it again.',
     whoami: 'Your Telegram ID is',
   },
   ru: {
@@ -153,14 +160,14 @@ const text = {
     askPortraitPhoto: 'Отправьте портретное фото:',
     askRightProfilePhoto: 'Отправьте фото правого профиля:',
     askVideo:
-      'Отправьте интро-видео до 90 секунд (1:30). Скажите имя, возраст, город, таланты, затем покажите эмоции: радость, злость, грусть, удивление, восторг и страх.',
+      'Отправьте интро-видео до 90 секунд (1:30) и размером до 20 МБ. Скажите имя, возраст, город, таланты, затем покажите эмоции: радость, злость, грусть, удивление, восторг и страх.',
     askWeight: 'Вес:',
     badAge: 'Возраст должен быть только цифрами и не больше 130.',
     badHeight: 'Рост должен быть только цифрами и не больше 250.',
     badName: 'Имя должно содержать только буквы и пробелы. Пример: Abdukarim Salomov',
     badPhone: 'Используйте кнопку телефона или отправьте корректный номер.',
     badPhoto: 'Отправьте фото.',
-    badVideo: 'Отправьте видео до 90 секунд (1:30).',
+    badVideo: 'Отправьте видео до 90 секунд (1:30) и размером до 20 МБ.',
     badWeight: 'Вес должен быть только цифрами.',
     cancel: 'Регистрация отменена. Отправьте /start, чтобы начать заново.',
     castingList: 'Актуальные кастинги:',
@@ -203,6 +210,8 @@ const text = {
     unexpected: 'Ответьте на текущий вопрос в указанном формате.',
     useButtons: 'Используйте кнопки в текущем сообщении.',
     unknownAdmin: 'Неизвестная команда администратора. Отправьте /help.',
+    videoTooLarge:
+      '⚠️ Это видео слишком большое. Максимальный поддерживаемый размер — {maxFileSize}. Сожмите или уменьшите видео и отправьте его снова.',
     whoami: 'Ваш Telegram ID',
   },
   uz: {
@@ -234,14 +243,14 @@ const text = {
     askPortraitPhoto: 'Portret fotosurat yuboring:',
     askRightProfilePhoto: 'O‘ng profil fotosuratini yuboring:',
     askVideo:
-      '90 sekundgacha (1:30) intro video yuboring. Ism, yosh, shahar, talantlarni ayting, keyin hissiyotlarni ko‘rsating: quvonch, jahldorlik, xafa bo‘lish, hayrat, hayajon va qo‘rquv.',
+      '90 sekundgacha (1:30) va 20 MB gacha intro video yuboring. Ism, yosh, shahar, talantlarni ayting, keyin hissiyotlarni ko‘rsating: quvonch, jahldorlik, xafa bo‘lish, hayrat, hayajon va qo‘rquv.',
     askWeight: 'Vazn:',
     badAge: 'Yosh faqat raqam bo‘lishi kerak va 130 dan oshmasligi kerak.',
     badHeight: 'Bo‘y faqat raqam bo‘lishi kerak va 250 dan oshmasligi kerak.',
     badName: 'Ism faqat harflar va bo‘sh joylardan iborat bo‘lishi kerak. Masalan: Abdukarim Salomov',
     badPhone: 'Telefon tugmasidan foydalaning yoki to‘g‘ri raqam yuboring.',
     badPhoto: 'Fotosurat yuboring.',
-    badVideo: '90 sekundgacha (1:30) video yuboring.',
+    badVideo: '90 sekundgacha (1:30) va 20 MB gacha video yuboring.',
     badWeight: 'Vazn faqat raqam bo‘lishi kerak.',
     cancel: 'Ro‘yxatdan o‘tish bekor qilindi. Qayta boshlash uchun /start yuboring.',
     castingList: 'Aktual kastinglar:',
@@ -284,6 +293,8 @@ const text = {
     unexpected: 'Joriy savolga ko‘rsatilgan formatda javob bering.',
     useButtons: 'Joriy xabardagi tugmalardan foydalaning.',
     unknownAdmin: 'Noma’lum admin buyrug‘i. /help yuboring.',
+    videoTooLarge:
+      '⚠️ Bu video juda katta. Qo‘llab-quvvatlanadigan maksimal hajm — {maxFileSize}. Videoni siqib yoki hajmini kamaytirib, qayta yuboring.',
     whoami: 'Sizning Telegram ID',
   },
 }
@@ -1563,13 +1574,30 @@ async function storeVideo(message) {
     return undefined
   }
 
-  const file = await call('getFile', { file_id: video.file_id })
-  const saved = await saveTelegramFile({
-    filePath: file.file_path,
-    fileUniqueId: video.file_unique_id,
-    folder: 'videos',
-    token,
-  })
+  if (!isWithinTelegramFileLimit(video.file_size)) {
+    return { error: 'too_large' }
+  }
+
+  let file
+  let saved
+  try {
+    file = await call('getFile', { file_id: video.file_id })
+    saved = await saveTelegramFile({
+      filePath: file.file_path,
+      fileUniqueId: video.file_unique_id,
+      folder: 'videos',
+      token,
+    })
+  } catch (error) {
+    const errorMessage = String(error?.message ?? '')
+    if (
+      (error?.code === 'telegram_400' && /file (?:is )?too (?:big|large)/i.test(errorMessage))
+      || /Telegram file exceeds the \d+-byte limit/i.test(errorMessage)
+    ) {
+      return { error: 'too_large' }
+    }
+    throw error
+  }
 
   return {
     duration: video.duration,
@@ -2240,6 +2268,11 @@ async function handleTextMessage(chatId, from, message) {
     const video = await storeVideo(message)
     if (!video) {
       await sendPrompt(session, t.badVideo)
+      return
+    }
+    if (video.error === 'too_large') {
+      const maxFileSize = `${Math.floor(MAX_TELEGRAM_FILE_BYTES / (1024 * 1024))} MB`
+      await sendPrompt(session, t.videoTooLarge.replace('{maxFileSize}', maxFileSize))
       return
     }
     session.data.introVideoFileId = video.fileId
