@@ -14,6 +14,7 @@ import {
 } from './candidateRepository.js'
 import { readMediaReference, saveTelegramFile } from './photoStorage.js'
 import { talentLabel, talentTaxonomy } from './taxonomy.js'
+import { callTelegramApi } from './telegramApi.js'
 
 loadLocalEnv()
 
@@ -27,6 +28,7 @@ const apiBase = `https://api.telegram.org/bot${token}`
 const telegramChannelUrl = String(process.env.TELEGRAM_CHANNEL_URL ?? '').trim()
 const sessions = new Map()
 const exampleFileIdCache = new Map()
+const userUpdateChains = new Map()
 
 if (!token && process.env.TELEGRAM_DISABLED !== 'true') {
   throw new Error('TELEGRAM_BOT_TOKEN is missing')
@@ -55,7 +57,7 @@ const text = {
     adminRejectButton: 'Reject',
     adminRegister: 'This account is admin. Use another Telegram account to test the user form.',
     adminStatus: 'Bot is online. User registration is open.',
-    approved: 'Your profile card has been sent to admin.',
+    approved: 'Your profile has been saved for admin review.',
     approveProfile: 'Approve card',
     askAge: 'Your age:',
     askCity: 'Which city are you based in?',
@@ -91,7 +93,10 @@ const text = {
     duplicatePhone: 'This phone number already exists. Send another phone number or /cancel.',
     edit: 'Edit',
     editPrompt: 'Which section do you want to edit?',
+    expired: 'This button has expired. Use the newest message or send /start.',
     examplePhoto: 'Example photo',
+    help: 'Commands: /start, /help, /cancel. Your current registration progress is preserved when you use /help.',
+    inProgress: 'Registration is already in progress. Finish it or send /cancel before using the main menu.',
     keepCurrent: 'Leave current',
     menuCastings: '🎬 Current Projects',
     menuFriend: '👥 Register a friend',
@@ -113,11 +118,13 @@ const text = {
     registerFriend: 'Register a friend',
     registerSelf: 'Register myself',
     reviewActions: 'Check your card. It will be sent to admin only after you approve it:',
-    savedAfterEdit: 'Updated card has been sent to admin.',
+    savedAfterEdit: 'Your updated profile has been saved for admin review.',
     selectDone: 'Select options, then press Next.',
     sendCustom: 'Type your custom value:',
     start:
       'Welcome to our Telegram bot.\nДобро пожаловать в наш Telegram-бот.\nTelegram botimizga xush kelibsiz.',
+    unexpected: 'Please answer the current question using the requested format.',
+    useButtons: 'Please use the buttons on the current message.',
     unknownAdmin: 'Unknown admin command. Send /help.',
     whoami: 'Your Telegram ID is',
   },
@@ -129,7 +136,7 @@ const text = {
     adminRejectButton: 'Отклонить',
     adminRegister: 'Этот аккаунт администратор. Для теста формы используйте другой Telegram-аккаунт.',
     adminStatus: 'Бот онлайн. Регистрация пользователей открыта.',
-    approved: 'Ваша карточка отправлена администратору.',
+    approved: 'Ваша анкета сохранена и ожидает проверки администратора.',
     approveProfile: 'Подтвердить карточку',
     askAge: 'Ваш возраст:',
     askCity: 'В каком городе/регионе вы находитесь?',
@@ -165,7 +172,10 @@ const text = {
     duplicatePhone: 'Этот номер уже есть в базе. Отправьте другой номер или /cancel.',
     edit: 'Редактировать',
     editPrompt: 'Какой раздел хотите изменить?',
+    expired: 'Эта кнопка устарела. Используйте последнее сообщение или отправьте /start.',
     examplePhoto: 'Пример фото',
+    help: 'Команды: /start, /help, /cancel. Команда /help не сбрасывает текущую регистрацию.',
+    inProgress: 'Регистрация уже идет. Завершите ее или отправьте /cancel перед использованием главного меню.',
     keepCurrent: 'Оставить текущее',
     menuCastings: '🎬 Текущие проекты',
     menuFriend: '👥 Зарегистрировать друга',
@@ -187,11 +197,13 @@ const text = {
     registerFriend: 'Зарегистрировать друга',
     registerSelf: 'Зарегистрировать себя',
     reviewActions: 'Проверьте карточку. Она уйдет администратору только после вашего подтверждения:',
-    savedAfterEdit: 'Обновленная карточка отправлена администратору.',
+    savedAfterEdit: 'Обновленная анкета сохранена и ожидает проверки администратора.',
     selectDone: 'Выберите варианты, затем нажмите Далее.',
     sendCustom: 'Напишите свой вариант:',
     start:
       'Welcome to our Telegram bot.\nДобро пожаловать в наш Telegram-бот.\nTelegram botimizga xush kelibsiz.',
+    unexpected: 'Ответьте на текущий вопрос в указанном формате.',
+    useButtons: 'Используйте кнопки в текущем сообщении.',
     unknownAdmin: 'Неизвестная команда администратора. Отправьте /help.',
     whoami: 'Ваш Telegram ID',
   },
@@ -203,7 +215,7 @@ const text = {
     adminRejectButton: 'Rad etish',
     adminRegister: 'Bu akkaunt admin. Formani test qilish uchun boshqa Telegram akkauntdan foydalaning.',
     adminStatus: 'Bot onlayn. Foydalanuvchi ro‘yxatdan o‘tishi ochiq.',
-    approved: 'Profil kartangiz adminga yuborildi.',
+    approved: 'Profilingiz saqlandi va administrator tekshiruvini kutmoqda.',
     approveProfile: 'Kartani tasdiqlash',
     askAge: 'Yoshingiz:',
     askCity: 'Qaysi shahar/viloyatdasiz?',
@@ -239,7 +251,10 @@ const text = {
     duplicatePhone: 'Bu telefon raqami bazada bor. Boshqa raqam yuboring yoki /cancel.',
     edit: 'Tahrirlash',
     editPrompt: 'Qaysi bo‘limni o‘zgartirasiz?',
+    expired: 'Bu tugma eskirgan. Eng so‘nggi xabardan foydalaning yoki /start yuboring.',
     examplePhoto: 'Foto namunasi',
+    help: 'Buyruqlar: /start, /help, /cancel. /help joriy ro‘yxatdan o‘tish jarayonini bekor qilmaydi.',
+    inProgress: 'Ro‘yxatdan o‘tish davom etmoqda. Asosiy menyudan oldin uni tugating yoki /cancel yuboring.',
     keepCurrent: 'Joriyni qoldirish',
     menuCastings: '🎬 Joriy loyihalar',
     menuFriend: '👥 Do‘stni ro‘yxatdan o‘tkazish',
@@ -261,11 +276,13 @@ const text = {
     registerFriend: 'Do‘stni ro‘yxatdan o‘tkazish',
     registerSelf: 'O‘zimni ro‘yxatdan o‘tkazish',
     reviewActions: 'Kartani tekshiring. U adminga faqat siz tasdiqlagandan keyin yuboriladi:',
-    savedAfterEdit: 'Yangilangan karta adminga yuborildi.',
+    savedAfterEdit: 'Yangilangan profilingiz saqlandi va administrator tekshiruvini kutmoqda.',
     selectDone: 'Variantlarni tanlang, keyin Keyingi tugmasini bosing.',
     sendCustom: 'O‘zingizning variantingizni yozing:',
     start:
       'Welcome to our Telegram bot.\nДобро пожаловать в наш Telegram-бот.\nTelegram botimizga xush kelibsiz.',
+    unexpected: 'Joriy savolga ko‘rsatilgan formatda javob bering.',
+    useButtons: 'Joriy xabardagi tugmalardan foydalaning.',
     unknownAdmin: 'Noma’lum admin buyrug‘i. /help yuboring.',
     whoami: 'Sizning Telegram ID',
   },
@@ -416,18 +433,7 @@ const photoSteps = {
 }
 
 async function call(method, payload = {}) {
-  const response = await fetch(`${apiBase}/${method}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  const data = await response.json()
-
-  if (!response.ok || !data.ok) {
-    throw new Error(data.description ?? `${method} failed`)
-  }
-
-  return data.result
+  return callTelegramApi(apiBase, method, { payload })
 }
 
 async function hydrateSession(userId) {
@@ -472,17 +478,7 @@ async function uploadFile(method, fields, fileField, filePath) {
   const fileName = filePath.split('/').at(-1) ?? 'media'
   form.append(fileField, new Blob([file]), fileName)
 
-  const response = await fetch(`${apiBase}/${method}`, {
-    body: form,
-    method: 'POST',
-  })
-  const data = await response.json()
-
-  if (!response.ok || !data.ok) {
-    throw new Error(data.description ?? `${method} failed`)
-  }
-
-  return data.result
+  return callTelegramApi(apiBase, method, { body: form })
 }
 
 async function sendLocalPhoto(chatId, filePath, caption) {
@@ -553,17 +549,7 @@ async function sendLocalMediaGroup(chatId, mediaItems) {
 
   form.append('media', JSON.stringify(media))
 
-  const response = await fetch(`${apiBase}/sendMediaGroup`, {
-    body: form,
-    method: 'POST',
-  })
-  const data = await response.json()
-
-  if (!response.ok || !data.ok) {
-    throw new Error(data.description ?? 'sendMediaGroup failed')
-  }
-
-  return data.result
+  return callTelegramApi(apiBase, 'sendMediaGroup', { body: form })
 }
 
 async function sendPrompt(session, messageText, options = {}) {
@@ -610,25 +596,28 @@ async function safeDelete(chatId, messageId) {
   }
 }
 
-async function cleanupStep(session, incomingMessage) {
-  const messageIds = session.promptMessageIds ?? []
-  for (const messageId of messageIds) {
-    await safeDelete(session.chatId, messageId)
-  }
+async function cleanupStep(session) {
+  const messageIds = [...new Set(session.promptMessageIds ?? [])]
+  await Promise.all(messageIds.map((messageId) => safeDelete(session.chatId, messageId)))
   session.promptMessageIds = []
   session.multiMessageId = undefined
-
-  if (incomingMessage?.message_id) {
-    await safeDelete(incomingMessage.chat.id, incomingMessage.message_id)
-  }
 }
 
 async function cleanupPreview(session) {
-  const messageIds = session.previewMessageIds ?? []
-  for (const messageId of messageIds) {
-    await safeDelete(session.chatId, messageId)
-  }
+  const messageIds = [...new Set(session.previewMessageIds ?? [])]
+  await Promise.all(messageIds.map((messageId) => safeDelete(session.chatId, messageId)))
   session.previewMessageIds = []
+}
+
+async function cleanupSessionMessages(session) {
+  if (!session) {
+    return
+  }
+
+  await Promise.all([
+    cleanupStep(session),
+    cleanupPreview(session),
+  ])
 }
 
 function inlineKeyboard(rows) {
@@ -651,17 +640,17 @@ async function ignoreStaleCallback(query, session) {
   const messageId = query.message?.message_id
   const currentIds = currentCallbackMessageIds(session)
 
-  if (!messageId || currentIds.size === 0 || currentIds.has(messageId)) {
+  if (messageId && currentIds.has(messageId)) {
     return false
   }
 
-  await answerCallback(query.id)
+  await answerCallback(query.id, text[session.lang]?.expired ?? text.en.expired)
   return true
 }
 
 async function isStaleCallback(query, session, expectedStep) {
   if (expectedStep && session.step !== expectedStep) {
-    await answerCallback(query.id)
+    await answerCallback(query.id, text[session.lang]?.expired ?? text.en.expired)
     return true
   }
 
@@ -678,11 +667,11 @@ function contactKeyboard(lang) {
   }
 }
 
-function registrationModeKeyboard(lang) {
+function registrationModeKeyboard(lang, flowId) {
   const t = text[lang]
   return inlineKeyboard([
-    [{ text: `🙋 ${t.registerSelf}`, callback_data: `mode:self:${lang}` }],
-    [{ text: `👥 ${t.registerFriend}`, callback_data: `mode:friend:${lang}` }],
+    [{ text: `🙋 ${t.registerSelf}`, callback_data: `mode:${flowId}:self:${lang}` }],
+    [{ text: `👥 ${t.registerFriend}`, callback_data: `mode:${flowId}:friend:${lang}` }],
   ])
 }
 
@@ -693,6 +682,7 @@ function userMenuKeyboard(lang) {
         [text[lang].menuCastings],
         [text[lang].menuUpdate],
         [text[lang].menuProfile],
+        [text[lang].menuFriend],
       ],
       is_persistent: true,
       resize_keyboard: true,
@@ -822,10 +812,29 @@ function newSession(chatId, from, lang, existing, options = {}) {
     chatId,
     data: baseData,
     editing: false,
+    flowId: options.flowId ?? randomUUID().slice(0, 12),
     lang,
     proxy,
     replacingCandidateId: proxy ? undefined : existing?.id,
     step: 'name',
+  }
+}
+
+function newEntrySession(chatId, from) {
+  return {
+    chatId,
+    data: {
+      telegramChatId: chatId,
+      telegramFirstName: from.first_name,
+      telegramUserId: String(from.id),
+      telegramUsername: from.username,
+    },
+    editing: false,
+    flowId: randomUUID().slice(0, 12),
+    lang: 'en',
+    promptMessageIds: [],
+    proxy: false,
+    step: 'language',
   }
 }
 
@@ -1184,19 +1193,25 @@ function multiKeyboard(session, groupName) {
   return inlineKeyboard(rows)
 }
 
-async function askLanguage(chatId) {
-  await Promise.all([
-    send(
-      chatId,
-      `${text.en.start}\n\n${text.en.askLanguage}`,
-      inlineKeyboard([languageOptions.map((option) => ({ text: option.label, callback_data: `lang:${option.code}` }))]),
-    ),
-    send(chatId, text.ru.menuText, userMenuKeyboard('ru')),
-  ])
+async function askLanguage(session) {
+  await sendPrompt(
+    session,
+    `${text.en.start}\n\n${text.en.askLanguage}`,
+    inlineKeyboard([
+      languageOptions.map((option) => ({
+        text: option.label,
+        callback_data: `lang:${session.flowId}:${option.code}`,
+      })),
+    ]),
+  )
 }
 
-async function askRegistrationMode(chatId, lang) {
-  await send(chatId, text[lang].askMode, registrationModeKeyboard(lang))
+async function askRegistrationMode(session) {
+  await sendPrompt(
+    session,
+    text[session.lang].askMode,
+    registrationModeKeyboard(session.lang, session.flowId),
+  )
 }
 
 async function askStep(session) {
@@ -1356,10 +1371,19 @@ async function showCandidateMenu(chatId, candidate, lang) {
   )
 }
 
+async function startEntry(chatId, from) {
+  const session = newEntrySession(chatId, from)
+  sessions.set(String(from.id), session)
+  await askLanguage(session)
+}
+
 async function startForm(chatId, from, lang, options = {}) {
   const proxy = options.proxy === true
   const existing = proxy ? undefined : await findCandidateByTelegramId(from.id)
-  const session = newSession(chatId, from, lang, existing, { proxy })
+  const session = newSession(chatId, from, lang, existing, {
+    flowId: options.flowId,
+    proxy,
+  })
   sessions.set(String(from.id), session)
 
   if (!proxy && existing?.id && !options.forceUpdate) {
@@ -1539,29 +1563,48 @@ async function handleAdminDecisionCallback(query) {
   )
 }
 
-async function handleLanguageCallback(query) {
-  const lang = query.data.split(':')[1]
+async function handleLanguageCallback(query, session) {
+  const [, flowId, lang] = query.data.split(':')
+  if (flowId !== session.flowId) {
+    await answerCallback(query.id, text[session.lang]?.expired ?? text.en.expired)
+    return
+  }
   if (!text[lang]) {
     await answerCallback(query.id, 'Unknown language')
     return
   }
+  if (await isStaleCallback(query, session, 'language')) {
+    return
+  }
 
   await answerCallback(query.id, text[lang].askLanguage)
-  await safeDelete(query.message.chat.id, query.message.message_id)
-  await askRegistrationMode(query.message.chat.id, lang)
+  await cleanupStep(session)
+  session.lang = lang
+  session.step = 'mode'
+  await askRegistrationMode(session)
 }
 
-async function handleModeCallback(query) {
-  const [, mode, lang] = query.data.split(':')
+async function handleModeCallback(query, session) {
+  const [, flowId, mode, lang] = query.data.split(':')
 
+  if (flowId !== session.flowId || lang !== session.lang) {
+    await answerCallback(query.id, text[session.lang]?.expired ?? text.en.expired)
+    return
+  }
   if (!['self', 'friend'].includes(mode) || !text[lang]) {
     await answerCallback(query.id, 'Unknown')
     return
   }
+  if (await isStaleCallback(query, session, 'mode')) {
+    return
+  }
 
   await answerCallback(query.id, text[lang].askMode)
-  await safeDelete(query.message.chat.id, query.message.message_id)
-  await startForm(query.message.chat.id, query.from, lang, { proxy: mode === 'friend' })
+  await cleanupStep(session)
+  await startForm(query.message.chat.id, query.from, lang, {
+    flowId: randomUUID().slice(0, 12),
+    proxy: mode === 'friend',
+  })
 }
 
 async function handleSetCallback(query, session) {
@@ -1745,29 +1788,19 @@ async function handleCallback(query) {
     return
   }
 
-  if (query.data.startsWith('lang:')) {
-    if (sessions.has(String(query.from.id))) {
-      await answerCallback(query.id)
-      return
-    }
+  const session = sessions.get(String(query.from.id))
+  if (!session) {
+    await answerCallback(query.id, text.en.expired)
+    return
+  }
 
-    await handleLanguageCallback(query)
+  if (query.data.startsWith('lang:')) {
+    await handleLanguageCallback(query, session)
     return
   }
 
   if (query.data.startsWith('mode:')) {
-    if (sessions.has(String(query.from.id))) {
-      await answerCallback(query.id)
-      return
-    }
-
-    await handleModeCallback(query)
-    return
-  }
-
-  const session = sessions.get(String(query.from.id))
-  if (!session) {
-    await answerCallback(query.id, 'Send /start')
+    await handleModeCallback(query, session)
     return
   }
 
@@ -1795,6 +1828,8 @@ async function handleCallback(query) {
     await handleEditCallback(query, session)
     return
   }
+
+  await answerCallback(query.id, text[session.lang]?.expired ?? text.en.expired)
 }
 
 async function afterStep(session) {
@@ -1816,56 +1851,85 @@ async function handleTextMessage(chatId, from, message) {
   const userId = String(from.id)
   const messageText = String(message.text ?? '').trim()
   const command = commandOf(messageText)
+  const activeSession = sessions.get(userId)
+  const isAdmin = adminIds.includes(userId)
 
-  if (adminIds.includes(String(from.id))) {
-    if (command === '/friend' || command === '/register_friend') {
-      sessions.delete(userId)
-      await safeDelete(chatId, message.message_id)
-      await askLanguage(chatId)
-      return
-    }
-
-    await handleAdmin(chatId, from, command)
+  if (isAdmin && (command === '/friend' || command === '/register_friend')) {
+    await cleanupSessionMessages(activeSession)
+    sessions.delete(userId)
+    await startEntry(chatId, from)
     return
   }
 
-  if (command === '/start' || command === '/help') {
+  if (!isAdmin && command === '/start') {
+    await cleanupSessionMessages(activeSession)
     sessions.delete(userId)
-    safeDelete(chatId, message.message_id)
-    await askLanguage(chatId)
+    const existing = await findCandidateByTelegramId(from.id)
+    if (existing) {
+      await showCandidateMenu(chatId, existing, languageForCandidate(existing))
+    } else {
+      await startEntry(chatId, from)
+    }
+    return
+  }
+
+  if (command === '/help') {
+    const existing = activeSession ? undefined : await findCandidateByTelegramId(from.id)
+    const lang = activeSession?.lang && text[activeSession.lang]
+      ? activeSession.lang
+      : languageForCandidate(existing, 'en')
+    await send(
+      chatId,
+      text[lang].help,
+      activeSession ? removeKeyboard() : existing ? userMenuKeyboard(lang) : removeKeyboard(),
+    )
     return
   }
 
   if (command === '/cancel') {
+    const existing = activeSession ? undefined : await findCandidateByTelegramId(from.id)
+    const lang = activeSession?.lang && text[activeSession.lang]
+      ? activeSession.lang
+      : languageForCandidate(existing, 'en')
+    await cleanupSessionMessages(activeSession)
     sessions.delete(userId)
-    safeDelete(chatId, message.message_id)
-    await send(chatId, text.en.cancel, removeKeyboard())
+    await send(chatId, text[lang].cancel, removeKeyboard())
+    return
+  }
+
+  if (isAdmin && (!activeSession || ['/start', '/whoami', '/status'].includes(command))) {
+    await handleAdmin(chatId, from, command)
     return
   }
 
   const session = sessions.get(userId)
+  const isMenuAction = ['menuUpdate', 'menuFriend', 'menuProfile', 'menuCastings']
+    .some((key) => matchesMenuAction(messageText, key))
+
+  if (session && isMenuAction) {
+    await sendPrompt(session, text[session.lang]?.inProgress ?? text.en.inProgress, removeKeyboard())
+    return
+  }
+
   if (!session) {
     const existing = await findCandidateByTelegramId(from.id)
+    const lang = existing ? languageForCandidate(existing) : 'en'
+
     if (matchesMenuAction(messageText, 'menuUpdate')) {
-      await safeDelete(chatId, message.message_id)
       if (existing) {
-        await startForm(chatId, from, languageForCandidate(existing), { forceUpdate: true })
+        await startForm(chatId, from, lang, { forceUpdate: true })
       } else {
-        await askLanguage(chatId)
+        await startEntry(chatId, from)
       }
       return
     }
 
     if (matchesMenuAction(messageText, 'menuFriend')) {
-      await safeDelete(chatId, message.message_id)
-      const lang = existing ? languageForCandidate(existing) : 'ru'
       await startForm(chatId, from, lang, { proxy: true })
       return
     }
 
     if (matchesMenuAction(messageText, 'menuProfile')) {
-      await safeDelete(chatId, message.message_id)
-      const lang = existing ? languageForCandidate(existing) : 'ru'
       if (existing) {
         await sendCurrentProfile(chatId, existing, lang)
       } else {
@@ -1875,37 +1939,44 @@ async function handleTextMessage(chatId, from, message) {
     }
 
     if (matchesMenuAction(messageText, 'menuCastings')) {
-      await safeDelete(chatId, message.message_id)
-      await sendCurrentCastings(chatId, existing ?? {}, existing ? languageForCandidate(existing) : 'ru')
+      await sendCurrentCastings(chatId, existing ?? {}, lang)
       return
     }
 
-    await askLanguage(chatId)
+    await startEntry(chatId, from)
     return
   }
 
   const t = text[session.lang]
 
+  if (session.step === 'language' || session.step === 'mode' || session.step === 'preview') {
+    await sendPrompt(session, t.useButtons)
+    return
+  }
+
   if (session.awaitingCustomGroup) {
     const groupName = session.awaitingCustomGroup
     const group = multiGroups[groupName]
     const custom = String(message.text ?? '').trim()
-    if (custom) {
-      session.data[group.field] = [...selectedSet(session, groupName).filter((item) => item !== t.none), custom]
+    if (!custom) {
+      await sendPrompt(session, t.sendCustom)
+      return
     }
+
+    session.data[group.field] = [...selectedSet(session, groupName).filter((item) => item !== t.none), custom]
     session.awaitingCustomGroup = undefined
-    await cleanupStep(session, message)
+    await cleanupStep(session)
     await askStep(session)
     return
   }
 
   if (session.step === 'name') {
     if (!isValidName(messageText)) {
-      await send(chatId, t.badName)
+      await sendPrompt(session, t.badName)
       return
     }
     session.data.name = messageText
-    await cleanupStep(session, message)
+    await cleanupStep(session)
     await afterStep(session)
     return
   }
@@ -1913,51 +1984,51 @@ async function handleTextMessage(chatId, from, message) {
   if (session.step === 'phone') {
     const phone = getPhone(message, from, { allowSharedContact: session.proxy })
     if (!phone) {
-      await send(chatId, t.badPhone, session.proxy ? removeKeyboard() : contactKeyboard(session.lang))
+      await sendPrompt(session, t.badPhone, session.proxy ? removeKeyboard() : contactKeyboard(session.lang))
       return
     }
 
     const duplicate = await findCandidateByPhone(phone)
     if (duplicate && duplicate.id !== session.replacingCandidateId) {
-      await send(chatId, t.duplicatePhone, session.proxy ? removeKeyboard() : contactKeyboard(session.lang))
+      await sendPrompt(session, t.duplicatePhone, session.proxy ? removeKeyboard() : contactKeyboard(session.lang))
       return
     }
 
     session.data.phone = phone
-    await cleanupStep(session, message)
+    await cleanupStep(session)
     await afterStep(session)
     return
   }
 
   if (session.step === 'age') {
     if (!isDigits(messageText) || Number(messageText) > 130 || Number(messageText) < 1) {
-      await send(chatId, t.badAge)
+      await sendPrompt(session, t.badAge)
       return
     }
     session.data.age = Number(messageText)
-    await cleanupStep(session, message)
+    await cleanupStep(session)
     await afterStep(session)
     return
   }
 
   if (session.step === 'height') {
     if (!isDigits(messageText) || Number(messageText) > 250 || Number(messageText) < 1) {
-      await send(chatId, t.badHeight)
+      await sendPrompt(session, t.badHeight)
       return
     }
     session.data.height = messageText
-    await cleanupStep(session, message)
+    await cleanupStep(session)
     await afterStep(session)
     return
   }
 
   if (session.step === 'weight') {
     if (!isDigits(messageText) || Number(messageText) < 1) {
-      await send(chatId, t.badWeight)
+      await sendPrompt(session, t.badWeight)
       return
     }
     session.data.weight = messageText
-    await cleanupStep(session, message)
+    await cleanupStep(session)
     await afterStep(session)
     return
   }
@@ -1965,7 +2036,7 @@ async function handleTextMessage(chatId, from, message) {
   if (photoSteps[session.step]) {
     const photo = await storePhoto(message)
     if (!photo) {
-      await send(chatId, t.badPhoto)
+      await sendPrompt(session, t.badPhoto)
       return
     }
     const photoStep = photoSteps[session.step]
@@ -1977,7 +2048,7 @@ async function handleTextMessage(chatId, from, message) {
       session.data.photoPath = photo.path
     }
 
-    await cleanupStep(session, message)
+    await cleanupStep(session)
     await afterStep(session)
     return
   }
@@ -1985,15 +2056,23 @@ async function handleTextMessage(chatId, from, message) {
   if (session.step === 'video') {
     const video = await storeVideo(message)
     if (!video) {
-      await send(chatId, t.badVideo)
+      await sendPrompt(session, t.badVideo)
       return
     }
     session.data.introVideoFileId = video.fileId
     session.data.introVideoPath = video.path
     session.data.introVideoDuration = video.duration
-    await cleanupStep(session, message)
+    await cleanupStep(session)
     await afterStep(session)
+    return
   }
+
+  if (['city', 'gender', 'performance', 'sports', 'physical', 'languages', 'look'].includes(session.step)) {
+    await sendPrompt(session, t.useButtons)
+    return
+  }
+
+  await sendPrompt(session, t.unexpected)
 }
 
 async function handleAdmin(chatId, from, command) {
@@ -2017,7 +2096,24 @@ async function handleAdmin(chatId, from, command) {
   await send(chatId, t.unknownAdmin)
 }
 
-export async function handleBotUpdate(update) {
+async function serializeUserUpdate(userId, task) {
+  const previous = userUpdateChains.get(userId) ?? Promise.resolve()
+  const current = previous
+    .catch(() => undefined)
+    .then(task)
+
+  userUpdateChains.set(userId, current)
+
+  try {
+    return await current
+  } finally {
+    if (userUpdateChains.get(userId) === current) {
+      userUpdateChains.delete(userId)
+    }
+  }
+}
+
+async function handleBotUpdateSerial(update) {
   const query = update.callback_query
   const message = update.message
   const from = query?.from ?? message?.from
@@ -2032,10 +2128,7 @@ export async function handleBotUpdate(update) {
     return { handled: false, reason: 'private_chat_required' }
   }
 
-  // Skip DB session load for commands that reset state immediately anyway
-  const isStatelessCommand = !query && /^\/(start|help|cancel)\b/i.test(String(message?.text ?? '').trim())
-
-  if (userId && !isStatelessCommand) {
+  if (userId) {
     await hydrateSession(userId)
   }
 
@@ -2059,4 +2152,27 @@ export async function handleBotUpdate(update) {
       await persistSession(userId)
     }
   }
+}
+
+export async function handleBotUpdate(update) {
+  const from = update.callback_query?.from ?? update.message?.from
+  const userId = from?.id ? String(from.id) : undefined
+
+  if (!userId) {
+    return handleBotUpdateSerial(update)
+  }
+
+  return serializeUserUpdate(userId, () => handleBotUpdateSerial(update))
+}
+
+export const __botTesting = {
+  resetRuntimeState() {
+    exampleFileIdCache.clear()
+    sessions.clear()
+    userUpdateChains.clear()
+  },
+  sessionFor(userId) {
+    const session = sessions.get(String(userId))
+    return session ? structuredClone(session) : undefined
+  },
 }

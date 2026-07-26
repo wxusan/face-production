@@ -1,4 +1,5 @@
 import { config } from './config.js'
+import { callTelegramApi } from './telegramApi.js'
 
 const apiBase = 'https://api.telegram.org'
 
@@ -18,20 +19,7 @@ export class TelegramProvider {
       throw error
     }
 
-    const response = await fetch(`${apiBase}/bot${this.token}/${method}`, {
-      body: JSON.stringify(payload),
-      headers: { 'content-type': 'application/json' },
-      method: 'POST',
-    })
-    const data = await response.json()
-
-    if (!response.ok || !data.ok) {
-      const error = new Error(data.description ?? `Telegram API request failed: ${method}`)
-      error.statusCode = response.status || 502
-      throw error
-    }
-
-    return data.result
+    return callTelegramApi(`${apiBase}/bot${this.token}`, method, { payload })
   }
 
   async getMe() {

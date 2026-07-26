@@ -20,9 +20,15 @@ import { requireAdminWebToken } from './security.js'
 import { talentTaxonomy } from './taxonomy.js'
 import { telegramProvider } from './telegramProvider.js'
 import {
+  claimTelegramDelivery,
+  completeTelegramDelivery,
+  failTelegramDelivery,
+} from './telegramDeliveryRepository.js'
+import {
   claimTelegramUpdate,
   completeTelegramUpdate,
   releaseTelegramUpdate,
+  withTelegramUserLock,
 } from './telegramUpdateRepository.js'
 import { readCandidateMedia, readCandidatePhoto } from './photoStorage.js'
 import {
@@ -374,6 +380,8 @@ function candidateProfileHtml(candidate) {
     <script>
       (function() {
         var candidateId = ${JSON.stringify(candidate.id)};
+        var operationId = '';
+        document.getElementById('msgText').oninput = function() { operationId = ''; };
         document.getElementById('msgSend').onclick = async function() {
           var btn = document.getElementById('msgSend');
           var result = document.getElementById('msgResult');
@@ -383,15 +391,17 @@ function candidateProfileHtml(candidate) {
           result.className = '';
           result.textContent = '...';
           try {
+            operationId = operationId || ('candidate-' + crypto.randomUUID());
             var resp = await fetch('/api/candidates/' + encodeURIComponent(candidateId) + '/message', {
               method: 'POST',
               credentials: 'same-origin',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ text: text })
+              body: JSON.stringify({ operationId: operationId, text: text })
             });
             var data = await resp.json();
             if (!resp.ok) throw new Error(data.error || 'Ошибка');
             document.getElementById('msgText').value = '';
+            operationId = '';
             result.className = 'result';
             result.textContent = 'Отправлено ✓';
           } catch(e) {
@@ -550,6 +560,7 @@ function candidateAdminHtml() {
       var selectedId = '';
       var draftMessages = {};
       var draftRatings = {};
+      var deliveryOperations = { bulk: '', casting: '', candidates: {} };
       var postDraft = {
         bulkText: '',
         castingBody: '',
@@ -558,6 +569,9 @@ function candidateAdminHtml() {
         castingTitle: ''
       };
       var lastInteractionAt = 0;
+      function newOperationId(prefix) {
+        return prefix + '-' + crypto.randomUUID();
+      }
       var filterSections = {
         additional: false,
         main: true,
@@ -1209,11 +1223,29 @@ function candidateAdminHtml() {
           }
         };
         if (approve) approve.onclick = async function () {
-          var input = document.getElementById('ratingInput');
-          if (input) await postJson('/api/candidates/' + encodeURIComponent(candidate.id) + '/rating', { rating: Number(input.value) });
-          await decide(candidate.id, 'approve');
+          approve.disabled = true;
+          if (reject) reject.disabled = true;
+          try {
+            var input = document.getElementById('ratingInput');
+            if (input) await postJson('/api/candidates/' + encodeURIComponent(candidate.id) + '/rating', { rating: Number(input.value) });
+            await decide(candidate.id, 'approve');
+          } catch (error) {
+            approve.disabled = false;
+            if (reject) reject.disabled = false;
+            window.alert(error.message);
+          }
         };
-        if (reject) reject.onclick = function () { decide(candidate.id, 'reject'); };
+        if (reject) reject.onclick = async function () {
+          reject.disabled = true;
+          if (approve) approve.disabled = true;
+          try {
+            await decide(candidate.id, 'reject');
+          } catch (error) {
+            reject.disabled = false;
+            if (approve) approve.disabled = false;
+            window.alert(error.message);
+          }
+        };
         if (closeDetail) closeDetail.onclick = function () { selectedId = ''; renderApp(); };
         if (detailDrawer) detailDrawer.onclick = function (event) {
           if (event.target === detailDrawer) {
@@ -1226,18 +1258,27 @@ function candidateAdminHtml() {
         var singleText = document.getElementById('singleText');
         if (singleText) singleText.oninput = function () {
           draftMessages[candidate.id] = singleText.value;
+          deliveryOperations.candidates[candidate.id] = '';
           touchInteraction();
         };
         if (sendSingle) sendSingle.onclick = async function () {
           var output = document.getElementById('singleResult');
+          sendSingle.disabled = true;
           try {
             var value = singleText.value.trim();
-            await postJson('/api/candidates/' + encodeURIComponent(candidate.id) + '/message', { text: value });
+            deliveryOperations.candidates[candidate.id] = deliveryOperations.candidates[candidate.id] || newOperationId('candidate');
+            await postJson('/api/candidates/' + encodeURIComponent(candidate.id) + '/message', {
+              operationId: deliveryOperations.candidates[candidate.id],
+              text: value
+            });
             delete draftMessages[candidate.id];
+            delete deliveryOperations.candidates[candidate.id];
             singleText.value = '';
             output.textContent = 'Отправлено';
           } catch (error) {
             output.textContent = error.message;
+          } finally {
+            sendSingle.disabled = false;
           }
         };
       }
@@ -1249,6 +1290,8 @@ function candidateAdminHtml() {
         document.querySelectorAll('[data-recipient]').forEach(function (checkbox) {
           checkbox.onclick = function () {
             selectionMode = 'manual';
+            deliveryOperations.bulk = '';
+            deliveryOperations.casting = '';
             if (checkbox.checked && !selectedIds.includes(checkbox.dataset.recipient)) selectedIds.push(checkbox.dataset.recipient);
             if (!checkbox.checked) selectedIds = selectedIds.filter(function (id) { return id !== checkbox.dataset.recipient; });
             renderApp();
@@ -1259,32 +1302,46 @@ function candidateAdminHtml() {
           if (!input) return;
           input.oninput = input.onchange = function () {
             postDraft[id] = input.value;
+            if (id === 'bulkText') deliveryOperations.bulk = '';
+            else deliveryOperations.casting = '';
             touchInteraction();
           };
         });
-        if (selectFiltered) selectFiltered.onclick = function () { selectionMode = 'manual'; selectedIds = filtered.map(function (candidate) { return candidate.id; }); renderApp(); };
-        if (clearSelected) clearSelected.onclick = function () { selectionMode = 'manual'; selectedIds = []; renderApp(); };
+        if (selectFiltered) selectFiltered.onclick = function () { selectionMode = 'manual'; selectedIds = filtered.map(function (candidate) { return candidate.id; }); deliveryOperations.bulk = ''; deliveryOperations.casting = ''; renderApp(); };
+        if (clearSelected) clearSelected.onclick = function () { selectionMode = 'manual'; selectedIds = []; deliveryOperations.bulk = ''; deliveryOperations.casting = ''; renderApp(); };
         if (sendBulk) sendBulk.onclick = async function () {
           var output = document.getElementById('bulkResult');
+          sendBulk.disabled = true;
           try {
             var value = document.getElementById('bulkText').value.trim();
             if (!selectedRecipientIds().length) throw new Error('Выберите хотя бы одного получателя');
-            var result = await postJson('/api/admin/broadcast', { candidateIds: selectedIds, text: value });
+            deliveryOperations.bulk = deliveryOperations.bulk || newOperationId('broadcast');
+            var result = await postJson('/api/admin/broadcast', {
+              candidateIds: selectedIds,
+              operationId: deliveryOperations.bulk,
+              text: value
+            });
             postDraft.bulkText = '';
+            deliveryOperations.bulk = '';
             document.getElementById('bulkText').value = '';
             output.textContent = 'Отправлено: ' + result.sentCount + ', ошибок: ' + result.failed.length;
           } catch (error) {
             output.textContent = error.message;
+          } finally {
+            sendBulk.disabled = false;
           }
         };
         if (sendCasting) sendCasting.onclick = async function () {
           var output = document.getElementById('castingResult');
+          sendCasting.disabled = true;
           try {
             if (!selectedRecipientIds().length) throw new Error('Выберите хотя бы одного получателя');
+            deliveryOperations.casting = deliveryOperations.casting || newOperationId('casting');
             var result = await postJson('/api/castings', {
               body: document.getElementById('castingBody').value.trim(),
               candidateIds: selectedIds,
               endsAt: document.getElementById('castingEnd').value,
+              operationId: deliveryOperations.casting,
               sendNow: true,
               startsAt: document.getElementById('castingStart').value,
               title: document.getElementById('castingTitle').value.trim()
@@ -1293,6 +1350,7 @@ function candidateAdminHtml() {
             postDraft.castingBody = '';
             postDraft.castingStart = '';
             postDraft.castingEnd = '';
+            deliveryOperations.casting = '';
             document.getElementById('castingTitle').value = '';
             document.getElementById('castingBody').value = '';
             document.getElementById('castingStart').value = '';
@@ -1300,6 +1358,8 @@ function candidateAdminHtml() {
             output.textContent = result.casting.id + ' создан. Отправлено: ' + result.delivery.sent.length;
           } catch (error) {
             output.textContent = error.message;
+          } finally {
+            sendCasting.disabled = false;
           }
         };
       }
@@ -1394,14 +1454,61 @@ function eligibleMessagingCandidates(candidates, candidateIds) {
   })
 }
 
-async function sendCandidateMessages(candidates, message, action) {
+function requireOperationId(value) {
+  const operationId = String(value ?? '').trim()
+
+  if (!operationId || operationId.length > 200 || !/^[A-Za-z0-9._:-]+$/.test(operationId)) {
+    const error = new Error('A valid operationId is required')
+    error.statusCode = 400
+    throw error
+  }
+
+  return operationId
+}
+
+async function sendCandidateMessages(candidates, message, action, operationId) {
   const sent = []
   const failed = []
+  const recipients = new Map()
 
   for (const candidate of candidates) {
+    const chatId = candidateMessagingChatId(candidate)
+    if (chatId && !recipients.has(String(chatId))) {
+      recipients.set(String(chatId), candidate)
+    }
+  }
+
+  for (const [chatId, candidate] of recipients) {
+    let claim
+
     try {
-      const chatId = candidateMessagingChatId(candidate)
+      claim = await claimTelegramDelivery({
+        chatId,
+        data: { action, candidateId: candidate.id },
+        kind: action,
+        operationId,
+        recipientKey: chatId,
+      })
+
+      if (!claim.claimed) {
+        if (claim.status === 'sent') {
+          sent.push({
+            candidateId: candidate.id,
+            deduplicated: true,
+            messageId: claim.messageId,
+          })
+        } else {
+          failed.push({
+            candidateId: candidate.id,
+            error: 'Previous delivery outcome is uncertain; message was not sent again.',
+            status: claim.status,
+          })
+        }
+        continue
+      }
+
       const result = await telegramProvider.sendMessage(chatId, message)
+      await completeTelegramDelivery(claim, result.message_id)
       sent.push({ candidateId: candidate.id, messageId: result.message_id })
       await recordAuditEvent({
         action,
@@ -1411,6 +1518,15 @@ async function sendCandidateMessages(candidates, message, action) {
         outcome: 'sent',
       })
     } catch (error) {
+      if (claim?.claimed) {
+        try {
+          await failTelegramDelivery(claim, error)
+        } catch (ledgerError) {
+          console.error('Telegram delivery ledger update failed', {
+            code: ledgerError?.code ?? ledgerError?.name ?? 'unknown',
+          })
+        }
+      }
       failed.push({ candidateId: candidate.id, error: error.message })
       await recordAuditEvent({
         action,
@@ -1544,12 +1660,22 @@ export async function routeRequest(request, response) {
     const claim = await claimTelegramUpdate(update?.update_id)
 
     if (!claim.claimed) {
-      sendJson(response, 200, { deduplicated: true, ok: true })
+      if (claim.status === 'completed') {
+        sendJson(response, 200, { deduplicated: true, ok: true })
+        return
+      }
+
+      response.setHeader('retry-after', '2')
+      sendJson(response, 503, { error: 'Telegram update is already being processed' })
       return
     }
 
     try {
-      const result = await handleBotUpdate(update)
+      const telegramUserId = update?.callback_query?.from?.id ?? update?.message?.from?.id
+      const result = await withTelegramUserLock(
+        telegramUserId,
+        () => handleBotUpdate(update),
+      )
       await completeTelegramUpdate(claim.updateId)
       sendJson(response, 200, { ok: true, result })
     } catch (error) {
@@ -1616,6 +1742,7 @@ export async function routeRequest(request, response) {
     requireAdminWebToken(request)
     const body = await readJson(request)
     const message = String(body.text ?? '').trim()
+    const operationId = requireOperationId(body.operationId)
     const targetCandidateIds = Array.isArray(body.candidateIds)
       ? body.candidateIds.map(String).filter(Boolean)
       : []
@@ -1631,7 +1758,12 @@ export async function routeRequest(request, response) {
     }
 
     const candidates = eligibleMessagingCandidates(await listCandidates(), targetCandidateIds)
-    const result = await sendCandidateMessages(candidates, message, 'web_admin.bulk_message')
+    const result = await sendCandidateMessages(
+      candidates,
+      message,
+      'web_admin.bulk_message',
+      operationId,
+    )
 
     sendJson(response, 200, {
       ...result,
@@ -1653,6 +1785,7 @@ export async function routeRequest(request, response) {
     const body = await readJson(request)
     const title = String(body.title ?? '').trim()
     const castingBody = String(body.body ?? '').trim()
+    const operationId = requireOperationId(body.operationId)
     const startsAt = String(body.startsAt ?? '').trim()
     const endsAt = String(body.endsAt ?? '').trim()
 
@@ -1688,6 +1821,7 @@ export async function routeRequest(request, response) {
     const casting = await createCasting({
       body: castingBody,
       endsAt,
+      id: `CAST-${operationId}`,
       startsAt,
       status: body.status ?? 'active',
       targetCandidateIds,
@@ -1697,7 +1831,12 @@ export async function routeRequest(request, response) {
 
     if (body.sendNow !== false) {
       const candidates = eligibleMessagingCandidates(await listCandidates(), targetCandidateIds)
-      delivery = await sendCandidateMessages(candidates, castingMessage(casting), 'web_admin.casting_post')
+      delivery = await sendCandidateMessages(
+        candidates,
+        castingMessage(casting),
+        'web_admin.casting_post',
+        operationId,
+      )
     }
 
     await recordAuditEvent({
@@ -1802,7 +1941,23 @@ export async function routeRequest(request, response) {
           ? 'Ваш профиль FACE Production одобрен для внутренней кастинг-базы.'
           : 'Ваша заявка FACE Production рассмотрена и не одобрена на этом этапе.'
 
-      await telegramProvider.sendMessage(approvalChatId, message)
+      const decisionClaim = await claimTelegramDelivery({
+        chatId: approvalChatId,
+        data: { candidateId, nextStatus },
+        kind: 'web_admin.candidate_decision',
+        operationId: `decision:${candidateId}:${nextStatus}`,
+        recipientKey: String(approvalChatId),
+      })
+
+      if (decisionClaim.claimed) {
+        try {
+          const decisionMessage = await telegramProvider.sendMessage(approvalChatId, message)
+          await completeTelegramDelivery(decisionClaim, decisionMessage.message_id)
+        } catch (error) {
+          await failTelegramDelivery(decisionClaim, error)
+          throw error
+        }
+      }
     }
 
     await syncTelegramAdminDecision(candidate, nextStatus, 'web_admin')
@@ -1896,6 +2051,7 @@ export async function routeRequest(request, response) {
     const candidate = await findCandidate(candidateId)
     const body = await readJson(request)
     const message = String(body.text ?? '').trim()
+    const operationId = requireOperationId(body.operationId)
 
     if (!candidate) {
       sendJson(response, 404, { error: 'Candidate not found' })
@@ -1919,17 +2075,26 @@ export async function routeRequest(request, response) {
       return
     }
 
-    const result = await telegramProvider.sendMessage(targetChatId, message)
+    const delivery = await sendCandidateMessages(
+      [candidate],
+      message,
+      'web_admin.candidate_message',
+      operationId,
+    )
 
-    await recordAuditEvent({
-      action: 'web_admin.candidate_message',
-      actor: 'web_admin',
-      candidateId,
-      messageId: result.message_id,
-      outcome: 'sent',
+    if (delivery.failed.length) {
+      sendJson(response, 502, {
+        error: delivery.failed[0].error,
+        ok: false,
+      })
+      return
+    }
+
+    sendJson(response, 200, {
+      deduplicated: delivery.sent[0]?.deduplicated ?? false,
+      messageId: delivery.sent[0]?.messageId,
+      ok: true,
     })
-
-    sendJson(response, 200, { messageId: result.message_id, ok: true })
     return
   }
 

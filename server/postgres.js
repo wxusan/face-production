@@ -3,6 +3,7 @@ import pg from 'pg'
 const { Pool } = pg
 
 let pool
+let lockPool
 let schemaInitPromise = null
 
 export function hasPostgres() {
@@ -36,6 +37,51 @@ export function getPostgresPool() {
   }
 
   return pool
+}
+
+function getPostgresLockPool() {
+  if (!hasPostgres()) {
+    throw new Error('DATABASE_URL is not configured')
+  }
+
+  if (!lockPool) {
+    lockPool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      connectionTimeoutMillis: Number(process.env.DATABASE_CONNECTION_TIMEOUT_MS ?? 10000),
+      idleTimeoutMillis: Number(process.env.DATABASE_IDLE_TIMEOUT_MS ?? 30000),
+      max: Number(process.env.DATABASE_LOCK_POOL_MAX ?? 5),
+      ssl: shouldUseSsl() ? { rejectUnauthorized: false } : undefined,
+    })
+  }
+
+  return lockPool
+}
+
+export async function withPostgresAdvisoryLock(namespace, key, task) {
+  if (!hasPostgres()) {
+    return task()
+  }
+
+  const client = await getPostgresLockPool().connect()
+  const namespaceValue = Number(namespace)
+  const lockKey = String(key)
+
+  try {
+    await client.query(
+      'SELECT pg_advisory_lock($1::integer, hashtext($2))',
+      [namespaceValue, lockKey],
+    )
+    return await task()
+  } finally {
+    try {
+      await client.query(
+        'SELECT pg_advisory_unlock($1::integer, hashtext($2))',
+        [namespaceValue, lockKey],
+      )
+    } finally {
+      client.release()
+    }
+  }
 }
 
 export async function query(sql, params = []) {
@@ -107,6 +153,24 @@ async function _runSchemaInit() {
       )
     `)
     await client.query('CREATE INDEX IF NOT EXISTS telegram_updates_status_claimed_idx ON telegram_updates (status, claimed_at)')
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS telegram_deliveries (
+        operation_id text NOT NULL,
+        recipient_key text NOT NULL,
+        chat_id text NOT NULL,
+        kind text NOT NULL,
+        status text NOT NULL CHECK (status IN ('sending', 'sent', 'failed', 'uncertain')),
+        message_id text,
+        attempt_count integer NOT NULL DEFAULT 1,
+        last_error_code text,
+        data jsonb NOT NULL DEFAULT '{}'::jsonb,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        sent_at timestamptz,
+        PRIMARY KEY (operation_id, recipient_key)
+      )
+    `)
+    await client.query('CREATE INDEX IF NOT EXISTS telegram_deliveries_status_idx ON telegram_deliveries (status, updated_at)')
     await client.query(`
       CREATE TABLE IF NOT EXISTS castings (
         id text PRIMARY KEY,

@@ -1,6 +1,7 @@
-import { hasPostgres, query } from './postgres.js'
+import { hasPostgres, query, withPostgresAdvisoryLock } from './postgres.js'
 
 const STALE_CLAIM_MINUTES = 10
+const TELEGRAM_USER_LOCK_NAMESPACE = 164721
 
 function normalizeUpdateId(value) {
   const updateId = Number(value)
@@ -58,10 +59,44 @@ export async function claimTelegramUpdate(value) {
     [updateId, STALE_CLAIM_MINUTES],
   )
 
+  if (result.rowCount === 1) {
+    return {
+      attemptCount: result.rows[0].attempt_count,
+      claimed: true,
+      status: 'processing',
+      updateId,
+    }
+  }
+
+  const existing = await query(
+    `
+      SELECT status, attempt_count, claimed_at
+      FROM telegram_updates
+      WHERE update_id = $1
+      LIMIT 1
+    `,
+    [updateId],
+  )
+
   return {
-    claimed: result.rowCount === 1,
+    attemptCount: existing.rows[0]?.attempt_count,
+    claimed: false,
+    claimedAt: existing.rows[0]?.claimed_at,
+    status: existing.rows[0]?.status ?? 'unknown',
     updateId,
   }
+}
+
+export async function withTelegramUserLock(telegramUserId, task) {
+  if (telegramUserId == null || telegramUserId === '') {
+    return task()
+  }
+
+  return withPostgresAdvisoryLock(
+    TELEGRAM_USER_LOCK_NAMESPACE,
+    String(telegramUserId),
+    task,
+  )
 }
 
 export async function completeTelegramUpdate(value) {

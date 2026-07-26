@@ -108,12 +108,17 @@ async function insertPostgresCasting(casting) {
         COALESCE(($8::jsonb->>'createdAt')::timestamptz, now()),
         COALESCE(($8::jsonb->>'updatedAt')::timestamptz, now())
       )
+      ON CONFLICT (id) DO NOTHING
       RETURNING *
     `,
     postgresCastingParams(casting),
   )
 
-  return rowToCasting(result.rows[0])
+  if (result.rows[0]) {
+    return rowToCasting(result.rows[0])
+  }
+
+  return findPostgresCasting(casting.id)
 }
 
 async function readStoredCastings() {
@@ -143,7 +148,7 @@ export async function createCasting(casting) {
     createdAt: now,
     createdBy: casting.createdBy ?? 'web_admin',
     endsAt: casting.endsAt || '',
-    id: createCastingId(),
+    id: casting.id ?? createCastingId(),
     sentAt: casting.sentAt ?? '',
     startsAt: casting.startsAt || '',
     status: casting.status ?? 'active',
@@ -157,6 +162,10 @@ export async function createCasting(casting) {
   }
 
   const castings = await readJsonCastings()
+  const existing = castings.find((item) => item.id === created.id)
+  if (existing) {
+    return existing
+  }
   castings.unshift(created)
   await writeStoredCastings(castings)
   return created
