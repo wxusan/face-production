@@ -5,6 +5,7 @@ import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { handleBotUpdate } from './bot.js'
 import { createCasting, listCastings } from './castingRepository.js'
+import { formatCastingMessage } from './castingMessages.js'
 import { assertHostedConfiguration, config, getConfigStatus } from './config.js'
 import { readAuditEvents, recordAuditEvent } from './auditLog.js'
 import {
@@ -1801,7 +1802,7 @@ function requireOperationId(value) {
   return operationId
 }
 
-async function sendCandidateMessages(candidates, message, action, operationId) {
+async function sendCandidateMessages(candidates, message, action, operationId, messageOptions = {}) {
   const sent = []
   const failed = []
   const recipients = new Map()
@@ -1842,7 +1843,11 @@ async function sendCandidateMessages(candidates, message, action, operationId) {
         continue
       }
 
-      const result = await telegramProvider.sendMessage(chatId, message)
+      const recipientMessage = typeof message === 'function' ? message(candidate) : message
+      const recipientOptions = typeof messageOptions === 'function'
+        ? messageOptions(candidate)
+        : messageOptions
+      const result = await telegramProvider.sendMessage(chatId, recipientMessage, recipientOptions)
       await completeTelegramDelivery(claim, result.message_id)
       sent.push({ candidateId: candidate.id, messageId: result.message_id })
       await recordAuditEvent({
@@ -1874,16 +1879,6 @@ async function sendCandidateMessages(candidates, message, action, operationId) {
   }
 
   return { failed, sent }
-}
-
-function castingMessage(casting) {
-  return [
-    `🎬 ${casting.title}`,
-    '',
-    casting.body,
-    casting.startsAt ? `\n📅 Начало: ${new Date(casting.startsAt).toLocaleString('ru-RU')}` : '',
-    casting.endsAt ? `⏱ Завершение: ${new Date(casting.endsAt).toLocaleString('ru-RU')}` : '',
-  ].filter(Boolean).join('\n')
 }
 
 async function syncTelegramAdminDecision(candidate, nextStatus, source) {
@@ -2430,9 +2425,10 @@ export async function routeRequest(request, response) {
       const candidates = eligibleMessagingCandidates(await listCandidates(), targetCandidateIds)
       delivery = await sendCandidateMessages(
         candidates,
-        castingMessage(casting),
+        (candidate) => formatCastingMessage(casting, candidate),
         'web_admin.casting_post',
         operationId,
+        { parse_mode: 'HTML' },
       )
     }
 

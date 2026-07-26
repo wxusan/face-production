@@ -2,6 +2,7 @@ import { loadLocalEnv } from './env.js'
 import { randomUUID } from 'node:crypto'
 import { recordAuditEvent } from './auditLog.js'
 import { listActiveCastingsForCandidate } from './castingRepository.js'
+import { escapeTelegramHtml, formatCastingMessage } from './castingMessages.js'
 import { deleteBotSession, getBotSession, saveBotSession } from './botSessionRepository.js'
 import {
   createCandidateIntake,
@@ -1529,16 +1530,6 @@ async function showProfile(session) {
   session.previewControlMessageId = card.message_id
 }
 
-function castingCard(casting) {
-  return [
-    `🎬 ${casting.title}`,
-    '',
-    casting.body,
-    casting.startsAt ? `\n📅 ${new Date(casting.startsAt).toLocaleString('ru-RU')}` : '',
-    casting.endsAt ? `⏱ ${new Date(casting.endsAt).toLocaleString('ru-RU')}` : '',
-  ].filter(Boolean).join('\n')
-}
-
 async function sendCurrentCastings(chatId, candidate, lang) {
   const castings = await listActiveCastingsForCandidate(candidate)
   const channelAccess = telegramChannelUrl
@@ -1550,7 +1541,14 @@ async function sendCurrentCastings(chatId, candidate, lang) {
     return
   }
 
-  await send(chatId, `${text[lang].castingList}\n\n${castings.map(castingCard).join('\n\n────────\n\n')}${channelAccess}`, channelKeyboard(lang))
+  await send(
+    chatId,
+    `<b>${escapeTelegramHtml(text[lang].castingList)}</b>\n\n${castings.map((casting) => formatCastingMessage(casting, lang)).join('\n\n────────\n\n')}${escapeTelegramHtml(channelAccess)}`,
+    {
+      ...channelKeyboard(lang),
+      parse_mode: 'HTML',
+    },
+  )
 }
 
 async function sendCurrentProfile(chatId, candidate, lang) {
