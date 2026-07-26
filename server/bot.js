@@ -28,7 +28,7 @@ const telegramChannelUrl = String(process.env.TELEGRAM_CHANNEL_URL ?? '').trim()
 const sessions = new Map()
 const exampleFileIdCache = new Map()
 
-if (!token) {
+if (!token && process.env.TELEGRAM_DISABLED !== 'true') {
   throw new Error('TELEGRAM_BOT_TOKEN is missing')
 }
 
