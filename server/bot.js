@@ -596,6 +596,9 @@ async function safeDelete(chatId, messageId) {
       message_id: messageId,
     })
   } catch (error) {
+    if (error?.statusCode === 400) {
+      return
+    }
     console.warn('Telegram message cleanup skipped', { code: error?.code ?? error?.name ?? 'unknown' })
   }
 }
@@ -612,6 +615,9 @@ async function safeDisableInlineKeyboard(chatId, messageId) {
       reply_markup: { inline_keyboard: [] },
     })
   } catch (error) {
+    if (error?.statusCode === 400) {
+      return
+    }
     console.warn('Telegram inline keyboard cleanup skipped', { code: error?.code ?? error?.name ?? 'unknown' })
   }
 }
