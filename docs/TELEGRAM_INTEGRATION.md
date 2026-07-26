@@ -56,6 +56,10 @@ Candidate commands:
 - `/help`
 - `/cancel`
 
+Casting channel buttons use `/start cast_<public-token>`. The token is compact,
+contains no candidate information, and restores the intended casting after a
+new user completes registration.
+
 The candidate registration flow collects:
 
 - full name
@@ -101,6 +105,14 @@ Non-admin Telegram users can register candidate profiles. They cannot run admin 
 - `GET /api/candidates/:id/media/:kind`
 - `GET /api/telegram/me`
 - `POST /api/telegram/webhook`
+- `GET /api/castings`
+- `POST /api/castings`
+- `GET /api/castings/:id/workspace`
+- `POST /api/castings/:id/manage`
+- `POST /api/castings/:id/invitations`
+- `POST /api/castings/:id/decisions`
+- `POST /api/castings/:id/messages`
+- `GET /api/castings/channel/health`
 - `POST /api/admin/notify`
 - `POST /api/admin/broadcast-dry-run`
 - `POST /api/candidates/:id/approve`
@@ -119,6 +131,10 @@ placed in a URL, or sent on every API request.
 - Admin authorization checks use the configured Telegram admin ID.
 - Audit events are written locally to `var/audit-log.jsonl`.
 - Candidate registration through Telegram is open and requires admin approval before active use.
+- A complete pending profile may apply to a casting while its general FACE
+  Production approval remains pending.
+- Casting delivery is queued durably, retried with backoff, and protected from
+  duplicate resend when Telegram delivery becomes uncertain.
 - Web admin actions require the local admin passcode.
 - AI matching, AI tagging, and AI moderation are excluded from the current MVP.
 - The bot token must be rotated before real production use because it has been shared during setup.

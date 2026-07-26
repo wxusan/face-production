@@ -33,6 +33,8 @@ export const config = {
   isHostedRuntime: Boolean(process.env.RAILWAY_SERVICE_ID || process.env.VERCEL),
   port: parsePort(process.env.PORT ?? process.env.SERVER_PORT, 8787),
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? '',
+  telegramCastingChannelId: process.env.TELEGRAM_CASTING_CHANNEL_ID ?? process.env.TELEGRAM_CHANNEL_ID ?? '',
+  telegramChannelUrl: process.env.TELEGRAM_CHANNEL_URL ?? '',
   telegramDisabled: process.env.TELEGRAM_DISABLED === 'true',
   telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET ?? '',
 }
@@ -80,6 +82,7 @@ export function getConfigStatus() {
     ready: configurationProblems.length === 0,
     webAuthConfigured: Boolean(config.adminWebToken),
     telegramConfigured: Boolean(config.telegramBotToken),
+    castingChannelConfigured: Boolean(config.telegramCastingChannelId),
     telegramDisabled: config.telegramDisabled,
     webhookSecretConfigured: Boolean(config.telegramWebhookSecret),
     configurationProblems,

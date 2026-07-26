@@ -1,7 +1,19 @@
 import { loadLocalEnv } from './env.js'
 import { randomUUID } from 'node:crypto'
 import { recordAuditEvent } from './auditLog.js'
-import { listActiveCastingsForCandidate } from './castingRepository.js'
+import {
+  castingPublicToken,
+  listActiveCastingsForCandidate,
+} from './castingRepository.js'
+import {
+  castingBotText,
+  castingOutcomeText,
+} from './castingBotMessages.js'
+import {
+  applyToCastingByToken,
+  getCastingParticipationContext,
+  respondToCastingInvitationByToken,
+} from './castingParticipationService.js'
 import { escapeTelegramHtml, formatCastingMessage } from './castingMessages.js'
 import { deleteBotSession, getBotSession, saveBotSession } from './botSessionRepository.js'
 import {
@@ -43,6 +55,7 @@ const telegramChannelUrl = String(process.env.TELEGRAM_CHANNEL_URL ?? '').trim()
 const sessions = new Map()
 const exampleFileIdCache = new Map()
 const userUpdateChains = new Map()
+const castingPublicTokenPattern = /^[A-Za-z0-9_-]{1,50}$/
 
 if (!token && process.env.TELEGRAM_DISABLED !== 'true') {
   throw new Error('TELEGRAM_BOT_TOKEN is missing')
@@ -789,6 +802,36 @@ function channelKeyboard(lang) {
   return inlineKeyboard([[{ text: text[lang].menuCastings, url: telegramChannelUrl }]])
 }
 
+function castingActionKeyboard(lang, publicToken, outcome, { applyNow = false } = {}) {
+  if (!castingPublicTokenPattern.test(publicToken)) {
+    return undefined
+  }
+
+  if (outcome === 'can_apply') {
+    return inlineKeyboard([[
+      {
+        callback_data: `cast:apply:${publicToken}`,
+        text: `🎬 ${castingBotText(lang, applyNow ? 'applyNow' : 'apply')}`,
+      },
+    ]])
+  }
+
+  if (outcome === 'invited') {
+    return inlineKeyboard([
+      [{
+        callback_data: `cast:accept:${publicToken}`,
+        text: `✅ ${castingBotText(lang, 'accept')}`,
+      }],
+      [{
+        callback_data: `cast:decline:${publicToken}`,
+        text: `✖️ ${castingBotText(lang, 'decline')}`,
+      }],
+    ])
+  }
+
+  return undefined
+}
+
 function removeKeyboard() {
   return {
     reply_markup: {
@@ -944,6 +987,13 @@ function commandOf(messageText) {
   return String(messageText ?? '').trim().split(/\s+/)[0].toLowerCase()
 }
 
+function castingTokenFromStart(messageText) {
+  const match = String(messageText ?? '')
+    .trim()
+    .match(/^\/start(?:@[A-Za-z0-9_]+)?\s+cast_([A-Za-z0-9_-]{1,50})$/i)
+  return match?.[1]
+}
+
 function languageForCandidate(candidate, fallback = 'ru') {
   return candidate?.language && text[candidate.language] ? candidate.language : fallback
 }
@@ -979,6 +1029,7 @@ function newSession(chatId, from, lang, existing, options = {}) {
     flowId: options.flowId ?? randomUUID().slice(0, 12),
     inlinePromptMessageIds: [],
     lang,
+    pendingCastingToken: options.pendingCastingToken,
     previewMessageIds: [],
     promptMessageIds: [],
     proxy,
@@ -988,7 +1039,7 @@ function newSession(chatId, from, lang, existing, options = {}) {
   }
 }
 
-function newEntrySession(chatId, from) {
+function newEntrySession(chatId, from, options = {}) {
   return {
     chatId,
     data: {
@@ -1001,6 +1052,7 @@ function newEntrySession(chatId, from) {
     flowId: randomUUID().slice(0, 12),
     inlinePromptMessageIds: [],
     lang: 'en',
+    pendingCastingToken: options.pendingCastingToken,
     previewMessageIds: [],
     promptMessageIds: [],
     proxy: false,
@@ -1530,6 +1582,80 @@ async function showProfile(session) {
   session.previewControlMessageId = card.message_id
 }
 
+function castingContextLanguage(context, fallback = 'en') {
+  return languageForCandidate(context?.candidate, fallback)
+}
+
+async function castingContextLanguageForUser(context, telegramUserId, fallback = 'en') {
+  if (context?.candidate) {
+    return castingContextLanguage(context, fallback)
+  }
+
+  const candidate = await findCandidateByTelegramId(telegramUserId)
+  return languageForCandidate(candidate, fallback)
+}
+
+async function sendCastingParticipationContext(
+  chatId,
+  context,
+  lang,
+  { applyNow = false } = {},
+) {
+  const language = text[lang] ? lang : 'en'
+  const statusText = castingOutcomeText(language, context.outcome, {
+    changed: context.changed === true,
+  })
+  const publicToken = context.casting ? castingPublicToken(context.casting) : ''
+  const keyboard = castingActionKeyboard(language, publicToken, context.outcome, { applyNow })
+  const heading = `🎬 <b>${escapeTelegramHtml(castingBotText(language, 'context'))}</b>`
+  const card = context.casting
+    ? `${heading}\n\n${formatCastingMessage(context.casting, language)}`
+    : heading
+
+  await send(
+    chatId,
+    `${card}\n\nℹ️ ${escapeTelegramHtml(statusText)}`,
+    {
+      ...(keyboard ?? {}),
+      parse_mode: 'HTML',
+    },
+  )
+}
+
+async function beginCastingRegistration(chatId, from, publicToken, context, lang) {
+  await sendCastingParticipationContext(chatId, context, lang)
+
+  if (context.outcome === 'registration_required') {
+    await startForm(chatId, from, lang, { pendingCastingToken: publicToken })
+    return true
+  }
+
+  if (['profile_incomplete', 'profile_rejected'].includes(context.outcome)) {
+    await startForm(chatId, from, lang, {
+      forceUpdate: true,
+      pendingCastingToken: publicToken,
+    })
+    return true
+  }
+
+  return false
+}
+
+async function handleCastingDeepLink(chatId, from, publicToken) {
+  const context = await getCastingParticipationContext({
+    publicToken,
+    telegramUserId: from.id,
+  })
+
+  if (context.outcome === 'registration_required') {
+    await startEntry(chatId, from, { pendingCastingToken: publicToken })
+    return
+  }
+
+  const lang = await castingContextLanguageForUser(context, from.id)
+  await beginCastingRegistration(chatId, from, publicToken, context, lang)
+}
+
 async function sendCurrentCastings(chatId, candidate, lang) {
   const castings = await listActiveCastingsForCandidate(candidate)
   const channelAccess = telegramChannelUrl
@@ -1541,14 +1667,21 @@ async function sendCurrentCastings(chatId, candidate, lang) {
     return
   }
 
-  await send(
-    chatId,
-    `<b>${escapeTelegramHtml(text[lang].castingList)}</b>\n\n${castings.map((casting) => formatCastingMessage(casting, lang)).join('\n\n────────\n\n')}${escapeTelegramHtml(channelAccess)}`,
-    {
-      ...channelKeyboard(lang),
-      parse_mode: 'HTML',
-    },
-  )
+  await send(chatId, `<b>${escapeTelegramHtml(text[lang].castingList)}</b>`, {
+    parse_mode: 'HTML',
+  })
+
+  for (const casting of castings) {
+    const context = await getCastingParticipationContext({
+      publicToken: castingPublicToken(casting),
+      telegramUserId: candidate.telegramUserId,
+    })
+    await sendCastingParticipationContext(chatId, context, lang)
+  }
+
+  if (channelAccess) {
+    await send(chatId, channelAccess.trim(), channelKeyboard(lang))
+  }
 }
 
 async function sendCurrentProfile(chatId, candidate, lang) {
@@ -1571,8 +1704,8 @@ async function showCandidateMenu(chatId, candidate, lang) {
   )
 }
 
-async function startEntry(chatId, from) {
-  const session = newEntrySession(chatId, from)
+async function startEntry(chatId, from, options = {}) {
+  const session = newEntrySession(chatId, from, options)
   sessions.set(String(from.id), session)
   await askLanguage(session)
 }
@@ -1582,6 +1715,7 @@ async function startForm(chatId, from, lang, options = {}) {
   const existing = proxy ? undefined : await findCandidateByTelegramId(from.id)
   const session = newSession(chatId, from, lang, existing, {
     flowId: options.flowId,
+    pendingCastingToken: options.pendingCastingToken,
     proxy,
   })
   sessions.set(String(from.id), session)
@@ -1783,6 +1917,26 @@ async function handleLanguageCallback(query, session) {
   await cleanupStep(session, { excludeMessageId: query.message?.message_id })
   session.lang = lang
   await annotateCompletedInlineQuestion(query, session, languageOptions.find((option) => option.code === lang)?.label ?? lang)
+
+  if (session.pendingCastingToken) {
+    const publicToken = session.pendingCastingToken
+    const context = await getCastingParticipationContext({
+      publicToken,
+      telegramUserId: query.from.id,
+    })
+    const registrationStarted = await beginCastingRegistration(
+      query.message.chat.id,
+      query.from,
+      publicToken,
+      context,
+      lang,
+    )
+    if (!registrationStarted) {
+      sessions.delete(String(query.from.id))
+    }
+    return
+  }
+
   session.step = 'mode'
   await askRegistrationMode(session)
 }
@@ -1801,6 +1955,10 @@ async function handleModeCallback(query, session) {
   if (await isStaleCallback(query, session, 'mode')) {
     return
   }
+  if (session.pendingCastingToken && mode === 'friend') {
+    await answerCallback(query.id, castingBotText(lang, 'selfOnly'))
+    return
+  }
 
   await answerCallback(query.id, text[lang].askMode)
   await cleanupStep(session, { excludeMessageId: query.message?.message_id })
@@ -1811,6 +1969,7 @@ async function handleModeCallback(query, session) {
   )
   await startForm(query.message.chat.id, query.from, lang, {
     flowId: randomUUID().slice(0, 12),
+    pendingCastingToken: session.pendingCastingToken,
     proxy: mode === 'friend',
   })
 }
@@ -1978,8 +2137,23 @@ async function handleFormCallback(query, session) {
     await cleanupPreview(session, { excludeMessageId: query.message?.message_id })
     await annotateCompletedInlineQuestion(query, session, t.approveProfile)
     const wasUpdate = Boolean(session.replacingCandidateId)
+    const pendingCastingToken = session.pendingCastingToken
     await saveProfile(session)
     await send(session.chatId, session.editing || wasUpdate ? t.savedAfterEdit : t.approved, candidateMenuKeyboard(session.lang))
+
+    if (pendingCastingToken) {
+      const castingContext = await getCastingParticipationContext({
+        publicToken: pendingCastingToken,
+        telegramUserId: query.from.id,
+      })
+      await sendCastingParticipationContext(
+        session.chatId,
+        castingContext,
+        session.lang,
+        { applyNow: true },
+      )
+    }
+
     sessions.delete(String(query.from.id))
   }
 }
@@ -2009,9 +2183,88 @@ async function handleEditCallback(query, session) {
   await askStep(session)
 }
 
+async function handleCastingCallback(query) {
+  const match = String(query.data ?? '').match(
+    /^cast:(apply|accept|decline):([A-Za-z0-9_-]{1,50})$/,
+  )
+  if (!match) {
+    await answerCallback(query.id, text.en.expired)
+    return
+  }
+
+  const [, action, publicToken] = match
+  const activeSession = sessions.get(String(query.from.id))
+  let result
+
+  if (action === 'apply') {
+    result = await applyToCastingByToken({
+      publicToken,
+      telegramUserId: query.from.id,
+    })
+  } else {
+    result = await respondToCastingInvitationByToken({
+      publicToken,
+      response: action,
+      telegramUserId: query.from.id,
+    })
+  }
+
+  const lang = await castingContextLanguageForUser(
+    result,
+    query.from.id,
+    activeSession?.lang ?? 'en',
+  )
+  const outcomeText = castingOutcomeText(lang, result.outcome, {
+    changed: result.changed === true,
+  })
+  await answerCallback(query.id, outcomeText.slice(0, 190))
+
+  if (
+    activeSession?.proxy
+    && ['registration_required', 'profile_incomplete', 'profile_rejected'].includes(result.outcome)
+  ) {
+    await send(query.message.chat.id, castingBotText(lang, 'selfOnly'))
+    return
+  }
+
+  if (['registration_required', 'profile_incomplete', 'profile_rejected'].includes(result.outcome)) {
+    if (activeSession) {
+      activeSession.pendingCastingToken = publicToken
+      await sendCastingParticipationContext(query.message.chat.id, result, lang)
+      return
+    }
+
+    if (result.outcome === 'registration_required') {
+      await startEntry(query.message.chat.id, query.from, {
+        pendingCastingToken: publicToken,
+      })
+      return
+    }
+
+    await beginCastingRegistration(
+      query.message.chat.id,
+      query.from,
+      publicToken,
+      result,
+      lang,
+    )
+    return
+  }
+
+  await safeDisableInlineKeyboard(
+    query.message?.chat?.id,
+    query.message?.message_id,
+  )
+  await sendCastingParticipationContext(query.message.chat.id, result, lang)
+}
+
 async function handleCallback(query) {
   if (query.data.startsWith('admin:')) {
     await handleAdminDecisionCallback(query)
+    return
+  }
+  if (query.data.startsWith('cast:')) {
+    await handleCastingCallback(query)
     return
   }
 
@@ -2080,6 +2333,16 @@ async function handleTextMessage(chatId, from, message) {
   const command = commandOf(messageText)
   const activeSession = sessions.get(userId)
   const isAdmin = adminIds.includes(userId)
+  const castingToken = command === '/start'
+    ? castingTokenFromStart(messageText)
+    : undefined
+
+  if (castingToken) {
+    await cleanupSessionMessages(activeSession)
+    sessions.delete(userId)
+    await handleCastingDeepLink(chatId, from, castingToken)
+    return
+  }
 
   if (isAdmin && (command === '/friend' || command === '/register_friend')) {
     await cleanupSessionMessages(activeSession)

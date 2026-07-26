@@ -313,6 +313,53 @@ export function isCandidateEligibleForMessaging(candidate) {
     && hasRequiredCandidateConsent(candidate)
 }
 
+const castingRequiredScalarFields = Object.freeze([
+  'name',
+  'phone',
+  'age',
+  'city',
+  'gender',
+  'height',
+  'weight',
+])
+const castingRequiredArrayFields = Object.freeze([
+  'performanceTalents',
+  'sportsTalents',
+  'physicalSkills',
+  'languageSkills',
+  'appearance',
+])
+const castingRequiredMediaFields = Object.freeze([
+  'fullBodyPhoto',
+  'closeShotPhoto',
+  'leftProfilePhoto',
+  'rightProfilePhoto',
+  'portraitPhoto',
+  'introVideo',
+])
+
+export function candidateCastingProfileMissingFields(candidate) {
+  const missingScalars = castingRequiredScalarFields.filter((field) => {
+    const value = candidate?.[field]
+    return value === undefined || value === null || String(value).trim() === ''
+  })
+  const missingArrays = castingRequiredArrayFields.filter(
+    (field) =>
+      !Array.isArray(candidate?.[field])
+      || candidate[field].every((value) => String(value ?? '').trim() === ''),
+  )
+  const missingMedia = castingRequiredMediaFields.filter(
+    (field) => !candidate?.[`${field}Path`] && !candidate?.[`${field}FileId`],
+  )
+  const missingConsent = hasRequiredCandidateConsent(candidate) ? [] : ['consent']
+  return [...missingScalars, ...missingArrays, ...missingMedia, ...missingConsent]
+}
+
+export function isCandidateEligibleForCastingApplication(candidate) {
+  return ['pending_review', 'approved', 'verified'].includes(candidate?.status)
+    && candidateCastingProfileMissingFields(candidate).length === 0
+}
+
 export async function listCandidateIntakes() {
   return readStoredCandidates()
 }

@@ -4,8 +4,30 @@ import { readFile } from 'node:fs/promises'
 import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { handleBotUpdate } from './bot.js'
-import { createCasting, listCastings } from './castingRepository.js'
-import { formatCastingMessage } from './castingMessages.js'
+import { createCasting, findCasting } from './castingRepository.js'
+import {
+  getCastingWorkspace,
+  inviteCandidatesToCasting,
+  listCastingsWithCounts,
+  manageCasting,
+  publishCasting,
+} from './castingManagementService.js'
+import { applyCastingAndProfileDecision } from './castingDecisionService.js'
+import {
+  findCastingParticipation,
+  removeCastingParticipant,
+} from './castingParticipationRepository.js'
+import { setCastingApplicationStatus } from './castingParticipationService.js'
+import {
+  enqueueCastingOutboxEvent,
+  listCastingOutboxEvents,
+} from './castingOutboxRepository.js'
+import { startCastingOutboxProcessor } from './castingOutboxProcessor.js'
+import {
+  getCastingChannelConfig,
+  recordCastingChannelHealth,
+  updateCastingChannelConfig,
+} from './castingChannelRepository.js'
 import { assertHostedConfiguration, config, getConfigStatus } from './config.js'
 import { readAuditEvents, recordAuditEvent } from './auditLog.js'
 import {
@@ -90,7 +112,7 @@ async function readJson(request) {
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, {
     'access-control-allow-headers': 'content-type, x-face-admin-token',
-    'access-control-allow-methods': 'GET,POST,OPTIONS',
+    'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
     'access-control-allow-origin': 'http://127.0.0.1:5173',
     'cache-control': 'no-store, private',
     'content-type': 'application/json',
@@ -446,7 +468,7 @@ function candidateProfileHtml(candidate) {
 </html>`
 }
 
-function candidateAdminHtml() {
+export function candidateAdminHtml() {
   const taxonomy = JSON.stringify({
     appearance: talentTaxonomy.appearance,
     languageSkills: talentTaxonomy.languages,
@@ -576,6 +598,37 @@ function candidateAdminHtml() {
     .postGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
     .postCard { display: grid; gap: 12px; padding: 16px; }
     .postCard textarea { min-height: 136px; }
+    .castingPage { display: grid; gap: 14px; }
+    .castingToolbar, .castingHeader, .castingTabs, .castingDecisionRow { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+    .castingToolbar, .castingHeader { justify-content: space-between; }
+    .castingGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .castingCard { display: grid; gap: 10px; padding: 15px; border: 1px solid #d7e0ec; border-radius: 8px; background: #fff; }
+    .castingCard h3, .castingCard p { margin: 0; }
+    .castingCard button { justify-self: start; }
+    .castingStatus { display: inline-flex; width: fit-content; min-height: 26px; align-items: center; padding: 0 9px; border-radius: 999px; background: #e8edf5; color: #334155; font-size: 12px; font-weight: 900; }
+    .castingStatus.published, .castingStatus.active { background: #dcfce7; color: #166534; }
+    .castingStatus.closed { background: #e0f2fe; color: #075985; }
+    .castingStatus.cancelled { background: #ffe4e6; color: #9f1239; }
+    .castingCounts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+    .castingCount { display: grid; gap: 3px; padding: 9px; border-radius: 8px; background: #f4f7fb; }
+    .castingCount strong { font-size: 18px; }
+    .castingCount span { color: #63748d; font-size: 11px; }
+    .castingForm { display: grid; gap: 12px; padding: 16px; border: 1px solid #d7e0ec; border-radius: 8px; background: #fff; }
+    .castingForm input, .castingFilters input, .castingFilters select { width: 100%; min-height: 40px; border: 1px solid #d7e0ec; border-radius: 8px; padding: 0 10px; background: #fff; color: #152033; }
+    .castingTabs { border-bottom: 1px solid #d7e0ec; }
+    .castingTab { min-height: 42px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: #63748d; font-weight: 850; cursor: pointer; }
+    .castingTab.active { border-bottom-color: #1b6ca8; color: #1b6ca8; }
+    .castingFilters { display: grid; grid-template-columns: minmax(180px, 2fr) repeat(2, minmax(130px, 1fr)); gap: 9px; }
+    .castingCandidateList { display: grid; gap: 8px; }
+    .castingCandidate { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 11px; border: 1px solid #d7e0ec; border-radius: 8px; background: #fff; }
+    .castingCandidate.disabled { background: #f8fafc; color: #64748b; }
+    .castingCandidate strong { display: block; }
+    .castingCandidate button { justify-self: end; }
+    .castingBadge { display: inline-flex; min-height: 24px; align-items: center; padding: 0 8px; border-radius: 999px; background: #e0f2fe; color: #075985; font-size: 11px; font-weight: 900; }
+    .castingBadge.applied { background: #fef3c7; color: #92400e; }
+    .castingBadge.invited { background: #ede9fe; color: #5b21b6; }
+    .castingMessage { display: grid; gap: 9px; padding: 12px; border: 1px solid #d7e0ec; border-radius: 8px; background: #f8fafc; }
+    .castingEmpty { min-height: 160px; display: grid; place-items: center; text-align: center; color: #63748d; }
     .composerDates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .composerDates label { display: grid; gap: 5px; color: #63748d; font-size: 12px; font-weight: 850; text-transform: uppercase; }
     .composerDates input { width: 100%; min-height: 40px; border: 1px solid #d7e0ec; border-radius: 8px; padding: 0 10px; background: #fff; color: #152033; }
@@ -587,9 +640,9 @@ function candidateAdminHtml() {
     .loginCard .langRow { justify-content: center; margin-top: 4px; }
     .loginCard .langBtn { border-color: #d7e0ec; color: #63748d; background: #f4f7fb; }
     .loginCard .langBtn.active { border-color: #1b6ca8; background: #1b6ca8; color: #fff; }
-    @media (max-width: 1180px) { .filterGrid, .postGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .rangeGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (max-width: 1180px) { .filterGrid, .postGrid, .castingGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .rangeGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     @media (max-width: 900px) { .postGrid { grid-template-columns: 1fr; } .sectionHeader { display: grid; } .statRow { justify-content: flex-start; } }
-    @media (max-width: 760px) { .app { grid-template-columns: 1fr; } .sidebar { padding: 16px; } .filterGrid, .rangeGrid, .facts, .media, .composerDates, .editGrid { grid-template-columns: 1fr; } .editGrid .wide { grid-column: auto; } .workspace { padding: 18px; } .topbar { display: grid; } .recipientItem { grid-template-columns: 24px minmax(0, 1fr); } .recipientItem .telegramBadge { grid-column: 2; justify-self: start; } }
+    @media (max-width: 760px) { .app { grid-template-columns: 1fr; } .sidebar { padding: 16px; } .filterGrid, .rangeGrid, .facts, .media, .composerDates, .editGrid, .castingGrid, .castingFilters, .castingCounts { grid-template-columns: 1fr; } .editGrid .wide { grid-column: auto; } .workspace { padding: 18px; } .topbar { display: grid; } .recipientItem, .castingCandidate { grid-template-columns: 24px minmax(0, 1fr); } .recipientItem .telegramBadge, .castingCandidate button { grid-column: 2; justify-self: start; } }
   </style>
 </head>
 <body>
@@ -598,7 +651,17 @@ function candidateAdminHtml() {
     (function () {
       var root = document.getElementById('root');
       var authenticated = false;
-      var candidates = [];
+	      var candidates = [];
+	      var castings = [];
+	      var castingWorkspace = null;
+	      var selectedCastingId = '';
+	      var castingView = 'list';
+	      var castingTab = 'applications';
+	      var invitationView = 'invite';
+	      var castingSelection = [];
+	      var castingFilters = { q: '', city: '', gender: '' };
+	      var castingDraft = { title: '', body: '', startsAt: '', endsAt: '' };
+	      var castingNotice = '';
       var customValues = [];
       var labels = [];
       var currentAdmin = null;
@@ -681,8 +744,22 @@ function candidateAdminHtml() {
           customValues: 'Пользовательские значения', deleteAction: 'Удалить', editComment: 'Изменить',
           editProfile: 'Редактировать профиль', mergeCustom: 'Объединить', newComment: 'Внутренняя заметка',
           newLabel: 'Новая метка', removeLabel: 'Убрать', renameCustom: 'Переименовать',
-          saveProfile: 'Сохранить профиль', profileDetails: 'Данные профиля',
-        },
+	          saveProfile: 'Сохранить профиль', profileDetails: 'Данные профиля',
+	          castingsPage: 'Кастинги', createCasting: 'Создать кастинг', editCasting: 'Редактировать',
+	          publishCasting: 'Опубликовать', closeCasting: 'Закрыть', cancelCasting: 'Отменить кастинг',
+	          draft: 'Черновик', published: 'Опубликован', closed: 'Закрыт', cancelled: 'Отменен',
+	          applicationsTab: 'Заявки', castingCandidatesTab: 'Кандидаты', invitationsTab: 'Приглашения',
+	          inviteView: 'Пригласить', awaitingView: 'Ожидают ответа', inviteSelected: 'Пригласить выбранных',
+	          appliedBadge: 'Уже подал заявку', invitedBadge: 'Уже приглашен', awaitingBadge: 'Ожидает',
+	          castingMessage: 'Сообщение по кастингу', acceptCasting: 'Принять на кастинг',
+	          rejectCasting: 'Отклонить с кастинга', profileDecision: 'Решение по профилю',
+	          keepProfile: 'Не менять профиль', approveProfile: 'Одобрить профиль', rejectProfile: 'Отклонить профиль',
+	          saveDraft: 'Сохранить черновик', castingDetailsUnavailable: 'Детали кастинга пока недоступны.',
+	          applicationsCount: 'Заявки', candidatesCount: 'Кандидаты', invitationsCount: 'Приглашения', awaitingCount: 'Ожидают',
+	          queuedDelivery: 'В очереди', deliveryIssues: 'Проблемы доставки', channelUnconfigured: 'Telegram-канал не настроен',
+	          removeFromCasting: 'Убрать из кастинга', cancelInvitation: 'Отменить приглашение',
+	          participantRemoved: 'Кандидат убран из кастинга', invitationCancelled: 'Приглашение отменено',
+	        },
         uz: {
           adminCode: 'Admin kodi', age: 'Yosh', ageFrom: 'Yosh dan', ageTo: 'Yosh gacha',
           all: 'Barchasi', allMedia: 'Barcha media', appearance: "Ko'rinish", approve: 'Tasdiqlash',
@@ -726,8 +803,22 @@ function candidateAdminHtml() {
           customValues: 'Maxsus qiymatlar', deleteAction: "O‘chirish", editComment: 'Tahrirlash',
           editProfile: 'Profilni tahrirlash', mergeCustom: 'Birlashtirish', newComment: 'Ichki izoh',
           newLabel: 'Yangi yorliq', removeLabel: 'Olib tashlash', renameCustom: 'Nomini o‘zgartirish',
-          saveProfile: 'Profilni saqlash', profileDetails: "Profil ma'lumotlari",
-        },
+	          saveProfile: 'Profilni saqlash', profileDetails: "Profil ma'lumotlari",
+	          castingsPage: 'Kastinglar', createCasting: 'Kasting yaratish', editCasting: 'Tahrirlash',
+	          publishCasting: 'E’lon qilish', closeCasting: 'Yopish', cancelCasting: 'Bekor qilish',
+	          draft: 'Qoralama', published: 'E’lon qilingan', closed: 'Yopilgan', cancelled: 'Bekor qilingan',
+	          applicationsTab: 'Arizalar', castingCandidatesTab: 'Nomzodlar', invitationsTab: 'Takliflar',
+	          inviteView: 'Taklif qilish', awaitingView: 'Javob kutilmoqda', inviteSelected: 'Tanlanganlarni taklif qilish',
+	          appliedBadge: 'Ariza topshirgan', invitedBadge: 'Taklif qilingan', awaitingBadge: 'Kutilmoqda',
+	          castingMessage: 'Kasting bo‘yicha xabar', acceptCasting: 'Kastingga qabul qilish',
+	          rejectCasting: 'Kastingdan rad etish', profileDecision: 'Profil qarori',
+	          keepProfile: 'Profilni o‘zgartirmaslik', approveProfile: 'Profilni tasdiqlash', rejectProfile: 'Profilni rad etish',
+	          saveDraft: 'Qoralamani saqlash', castingDetailsUnavailable: 'Kasting tafsilotlari hozircha mavjud emas.',
+	          applicationsCount: 'Arizalar', candidatesCount: 'Nomzodlar', invitationsCount: 'Takliflar', awaitingCount: 'Kutilmoqda',
+	          queuedDelivery: 'Navbatga qo‘yildi', deliveryIssues: 'Yetkazib berish muammolari', channelUnconfigured: 'Telegram kanali sozlanmagan',
+	          removeFromCasting: 'Kastingdan olib tashlash', cancelInvitation: 'Taklifni bekor qilish',
+	          participantRemoved: 'Nomzod kastingdan olib tashlandi', invitationCancelled: 'Taklif bekor qilindi',
+	        },
         en: {
           adminCode: 'Admin code', age: 'Age', ageFrom: 'Age from', ageTo: 'Age to',
           all: 'All', allMedia: 'All media', appearance: 'Appearance', approve: 'Approve',
@@ -771,8 +862,22 @@ function candidateAdminHtml() {
           customValues: 'Custom values', deleteAction: 'Delete', editComment: 'Edit',
           editProfile: 'Edit profile', mergeCustom: 'Merge', newComment: 'Internal note',
           newLabel: 'New label', removeLabel: 'Remove', renameCustom: 'Rename',
-          saveProfile: 'Save profile', profileDetails: 'Profile details',
-        }
+	          saveProfile: 'Save profile', profileDetails: 'Profile details',
+	          castingsPage: 'Castings', createCasting: 'Create casting', editCasting: 'Edit',
+	          publishCasting: 'Publish', closeCasting: 'Close', cancelCasting: 'Cancel casting',
+	          draft: 'Draft', published: 'Published', closed: 'Closed', cancelled: 'Cancelled',
+	          applicationsTab: 'Applications', castingCandidatesTab: 'Candidates', invitationsTab: 'Invitations',
+	          inviteView: 'Invite', awaitingView: 'Awaiting', inviteSelected: 'Invite selected',
+	          appliedBadge: 'Already applied', invitedBadge: 'Already invited', awaitingBadge: 'Awaiting',
+	          castingMessage: 'Casting message', acceptCasting: 'Accept for casting',
+	          rejectCasting: 'Reject from casting', profileDecision: 'Profile decision',
+	          keepProfile: 'Keep profile unchanged', approveProfile: 'Approve profile', rejectProfile: 'Reject profile',
+	          saveDraft: 'Save draft', castingDetailsUnavailable: 'Casting details are not available yet.',
+	          applicationsCount: 'Applications', candidatesCount: 'Candidates', invitationsCount: 'Invitations', awaitingCount: 'Awaiting',
+	          queuedDelivery: 'Queued', deliveryIssues: 'Delivery issues', channelUnconfigured: 'Telegram channel is not configured',
+	          removeFromCasting: 'Remove from casting', cancelInvitation: 'Cancel invitation',
+	          participantRemoved: 'Candidate removed from casting', invitationCancelled: 'Invitation cancelled',
+	        }
       };
       function t(key) { return (translations[lang] || translations.ru)[key] || key; }
       function getMediaFields() {
@@ -862,7 +967,7 @@ function candidateAdminHtml() {
           return candidates.filter(function (candidate) { return candidate.status === 'pending_review'; });
         }
 
-        if (activePage === 'candidates' || activePage === 'posts') {
+	        if (activePage === 'candidates' || activePage === 'posts' || activePage === 'castings') {
           return candidates.filter(function (candidate) { return candidate.status === 'approved' || candidate.status === 'verified'; });
         }
 
@@ -1063,7 +1168,9 @@ function candidateAdminHtml() {
       async function load() {
         try {
           captureDrafts();
-          var data = await api('/api/candidates');
+	          var responses = await Promise.all([api('/api/candidates'), api('/api/castings')]);
+	          var data = responses[0];
+	          castings = responses[1].castings || [];
           candidates = data.candidates || [];
           customValues = data.customValues || [];
           labels = data.labels || [];
@@ -1188,7 +1295,7 @@ function candidateAdminHtml() {
           return '<label class="recipientItem"><input type="checkbox" data-recipient="' + esc(candidate.id) + '" ' + (checked ? 'checked' : '') + '><div><strong>' + esc(candidate.name || '-') + '</strong><div class="recipientMeta">' + esc(candidate.id) + ' · ' + esc(candidate.city || '-') + ' · ' + esc(candidate.gender || '-') + ' · ' + esc(candidate.age || '-') + '</div></div><span class="telegramBadge' + (hasTelegram(candidate) ? '' : ' missing') + '">' + (hasTelegram(candidate) ? t('hasTelegram') : t('noTelegram')) + '</span></label>';
         }).join('') + '</div>';
       }
-      function renderPostsPage() {
+	      function renderPostsPage() {
         var selected = selectedRecipientIds();
         var selectedTelegram = filtered.filter(function (candidate) { return selected.includes(candidate.id) && hasTelegram(candidate); }).length;
         var foundTelegram = filtered.filter(hasTelegram).length;
@@ -1197,11 +1304,120 @@ function candidateAdminHtml() {
           '<section class="postPanel"><div class="sectionHeader"><div><p class="muted">' + t('postsOnly') + '</p><h3>' + t('messageRecipients') + '</h3></div><div class="statRow"><span class="statPill">' + t('foundShort') + ' ' + filtered.length + '</span><span class="statPill">' + t('selectedShort') + ' ' + selected.length + '</span><span class="statPill">Telegram: ' + selectedTelegram + ' / ' + foundTelegram + '</span></div></div>' +
           '<div class="recipientToolbar"><span class="muted">' + t('recipientsAllApproved') + '</span><div class="actions"><button class="secondary" id="selectAllRecipients">' + t('selectAll') + '</button><button class="secondary" id="clearSelected">' + t('deselect') + '</button></div></div>' +
           renderRecipientList() + '</section>' +
-          '<section class="postGrid">' +
-          '<div class="postCard"><div><p class="filterLabel">' + t('regularPost') + '</p><h3>' + t('messageSelected') + '</h3></div><textarea id="bulkText" placeholder="' + t('messageText') + '">' + esc(postDraft.bulkText) + '</textarea><div class="actions"><button class="primary" id="sendBulk"' + sendDisabled + '>' + t('sendPost') + '</button><span class="muted" id="bulkResult"></span></div></div>' +
-          '<div class="postCard"><div><p class="filterLabel">' + t('castingPostLabel') + '</p><h3>' + t('newCasting') + '</h3></div><input class="search" id="castingTitle" placeholder="' + t('castingTitlePlaceholder') + '" value="' + esc(postDraft.castingTitle) + '"><textarea id="castingBody" placeholder="' + t('castingBodyPlaceholder') + '">' + esc(postDraft.castingBody) + '</textarea><div class="composerDates"><label>' + t('castingStart') + '<input id="castingStart" type="datetime-local" value="' + esc(postDraft.castingStart) + '"></label><label>' + t('castingEnd') + '<input id="castingEnd" type="datetime-local" value="' + esc(postDraft.castingEnd) + '"></label></div><div class="actions"><button class="primary" id="sendCasting"' + sendDisabled + '>' + t('createSend') + '</button><span class="muted" id="castingResult"></span></div></div>' +
-          '</section></section>';
-      }
+	          '<section class="postGrid">' +
+	          '<div class="postCard"><div><p class="filterLabel">' + t('regularPost') + '</p><h3>' + t('messageSelected') + '</h3></div><textarea id="bulkText" placeholder="' + t('messageText') + '">' + esc(postDraft.bulkText) + '</textarea><div class="actions"><button class="primary" id="sendBulk"' + sendDisabled + '>' + t('sendPost') + '</button><span class="muted" id="bulkResult"></span></div></div>' +
+	          '</section></section>';
+	      }
+	      function castingStatusValue(casting) {
+	        return casting.status === 'active' ? 'published' : (casting.status || 'draft');
+	      }
+	      function castingStatusLabel(casting) {
+	        return t(castingStatusValue(casting));
+	      }
+	      function castingCounts(casting) {
+	        return Object.assign({ applications: 0, candidates: 0, invitations: 0, awaiting: 0 }, casting.counts || {});
+	      }
+	      function castingDeliveryNotice(delivery) {
+	        delivery = delivery || {};
+	        var queued = Number(delivery.queuedCount || (delivery.queued || []).length || 0);
+	        var failed = Number(delivery.failedCount || (delivery.failed || []).length || 0);
+	        var skipped = Array.isArray(delivery.skipped) ? delivery.skipped : [];
+	        var issues = failed + skipped.length;
+	        var channelMissing = skipped.some(function (item) { return item && item.reason === 'channel_unconfigured'; });
+	        return t('published') + ' · ' + t('queuedDelivery') + ': ' + queued + ' · ' + t('deliveryIssues') + ': ' + issues +
+	          (channelMissing ? ' · ' + t('channelUnconfigured') : '');
+	      }
+	      function renderCastingCounts(casting) {
+	        var counts = castingCounts(casting);
+	        return '<div class="castingCounts">' +
+	          [['applications', 'applicationsCount'], ['candidates', 'candidatesCount'], ['invitations', 'invitationsCount'], ['awaiting', 'awaitingCount']].map(function (item) {
+	            return '<div class="castingCount"><strong>' + Number(counts[item[0]] || 0) + '</strong><span>' + t(item[1]) + '</span></div>';
+	          }).join('') + '</div>';
+	      }
+	      function renderCastingList() {
+	        return '<section class="castingPage"><div class="castingToolbar"><div><p class="muted">' + t('castingsPage') + '</p><h3>' + t('castingsPage') + '</h3></div><button class="primary" id="newCasting">' + t('createCasting') + '</button></div>' +
+	          (castings.length ? '<div class="castingGrid">' + castings.map(function (casting) {
+	            return '<article class="castingCard"><span class="castingStatus ' + esc(castingStatusValue(casting)) + '">' + esc(castingStatusLabel(casting)) + '</span><h3>' + esc(casting.title || '-') + '</h3><p class="muted">' + esc(casting.body || '') + '</p><p class="muted">' + esc(casting.startsAt || '-') + ' — ' + esc(casting.endsAt || '-') + '</p>' + renderCastingCounts(casting) + '<button class="secondary" data-open-casting="' + esc(casting.id) + '">' + t('show') + '</button></article>';
+	          }).join('') + '</div>' : '<div class="panel castingEmpty">' + t('createCasting') + '</div>') + '</section>';
+	      }
+	      function renderCastingForm() {
+	        var editing = castings.find(function (item) { return item.id === selectedCastingId; });
+	        return '<section class="castingPage"><div class="castingToolbar"><button class="secondary" id="backToCastings">← ' + t('castingsPage') + '</button><h3>' + (editing ? t('editCasting') : t('createCasting')) + '</h3></div><div class="castingForm">' +
+	          '<input id="castingTitle" placeholder="' + t('castingTitlePlaceholder') + '" value="' + esc(castingDraft.title) + '">' +
+	          '<textarea id="castingBody" placeholder="' + t('castingBodyPlaceholder') + '">' + esc(castingDraft.body) + '</textarea>' +
+	          '<div class="composerDates"><label>' + t('castingStart') + '<input id="castingStart" type="datetime-local" value="' + esc(castingDraft.startsAt) + '"></label><label>' + t('castingEnd') + '<input id="castingEnd" type="datetime-local" value="' + esc(castingDraft.endsAt) + '"></label></div>' +
+	          '<div class="actions"><button class="secondary" id="saveCastingDraft">' + t('saveDraft') + '</button><button class="primary" id="publishCastingForm">' + t('publishCasting') + '</button><span class="muted" id="castingResult"></span></div></div></section>';
+	      }
+	      function castingWorkspaceCandidates(tab) {
+	        if (!castingWorkspace) return [];
+	        if (tab === 'applications') return castingWorkspace.applications || [];
+	        if (tab === 'candidates') return castingWorkspace.candidates || [];
+	        return (castingWorkspace.invitations || []).map(function (invitation) {
+	          var candidate = invitation.candidate || candidates.find(function (item) { return item.id === invitation.candidateId; }) || {};
+	          return Object.assign({}, candidate, { invitationStatus: invitation.status || 'awaiting', invitedAt: invitation.invitedAt });
+	        });
+	      }
+	      function candidateMatchesCastingFilters(candidate) {
+	        var q = castingFilters.q.trim().toLowerCase();
+	        var haystack = [candidate.id, candidate.name, candidate.phone, candidate.telegramUsername].map(norm).join(' ');
+	        if (q && !haystack.includes(q)) return false;
+	        if (castingFilters.city && candidate.city !== castingFilters.city) return false;
+	        if (castingFilters.gender && candidate.gender !== castingFilters.gender) return false;
+	        return true;
+	      }
+	      function castingAppliedIds() {
+	        return new Set((castingWorkspace && castingWorkspace.applications || []).map(function (candidate) { return candidate.id; }));
+	      }
+	      function castingInvitedIds() {
+	        return new Set((castingWorkspace && castingWorkspace.invitations || []).map(function (item) { return item.candidateId || (item.candidate || {}).id; }));
+	      }
+	      function renderCastingFilters() {
+	        return '<div class="castingFilters"><input id="castingSearch" placeholder="' + t('search') + '" value="' + esc(castingFilters.q) + '"><select id="castingCity"><option value="">' + t('city') + ': ' + t('all') + '</option>' + optionValues('city').map(function (value) { return '<option' + (castingFilters.city === value ? ' selected' : '') + '>' + esc(value) + '</option>'; }).join('') + '</select><select id="castingGender"><option value="">' + t('gender') + ': ' + t('all') + '</option>' + optionValues('gender').map(function (value) { return '<option' + (castingFilters.gender === value ? ' selected' : '') + '>' + esc(value) + '</option>'; }).join('') + '</select></div>';
+	      }
+	      function renderCastingCandidateRows() {
+	        var rows;
+	        var applied = castingAppliedIds();
+	        var invited = castingInvitedIds();
+	        if (castingTab === 'invitations' && invitationView === 'invite') {
+	          rows = candidates.filter(function (candidate) { return candidate.status === 'approved' || candidate.status === 'verified'; });
+	        } else {
+	          rows = castingWorkspaceCandidates(castingTab);
+	          if (castingTab === 'invitations' && invitationView === 'awaiting') {
+	            rows = rows.filter(function (candidate) { return candidate.invitationStatus === 'awaiting' || candidate.invitationStatus === 'invited'; });
+	          }
+	        }
+	        rows = rows.filter(candidateMatchesCastingFilters);
+	        if (!rows.length) return '<div class="castingEmpty">' + t('noResults') + '</div>';
+	        return '<div class="castingCandidateList">' + rows.map(function (candidate) {
+	          var isApplied = applied.has(candidate.id);
+	          var isInvited = invited.has(candidate.id);
+	          var disabled = castingTab === 'invitations' && invitationView === 'invite' && (isApplied || isInvited);
+	          var badge = isApplied ? '<span class="castingBadge applied">' + t('appliedBadge') + '</span>' : isInvited ? '<span class="castingBadge invited">' + t('invitedBadge') + '</span>' : candidate.invitationStatus ? '<span class="castingBadge invited">' + esc(candidate.invitationStatus) + '</span>' : '';
+	          var rowAction = castingTab === 'candidates'
+	            ? '<button class="danger" data-casting-participant-remove="' + esc(candidate.id) + '">' + t('removeFromCasting') + '</button>'
+	            : castingTab === 'invitations' && invitationView === 'awaiting' && candidate.invitationStatus === 'invited'
+	              ? '<button class="danger" data-casting-invitation-cancel="' + esc(candidate.id) + '">' + t('cancelInvitation') + '</button>'
+	              : '';
+	          return '<div class="castingCandidate' + (disabled ? ' disabled' : '') + '"><input type="checkbox" data-casting-select="' + esc(candidate.id) + '"' + (castingSelection.includes(candidate.id) ? ' checked' : '') + (disabled ? ' disabled' : '') + '><div><strong>' + esc(candidate.name || '-') + '</strong><span class="recipientMeta">' + esc(candidate.city || '-') + ' · ' + esc(candidate.gender || '-') + ' · ' + esc(candidate.age || '-') + '</span>' + badge + '</div><div class="actions"><button class="secondary" data-casting-candidate="' + esc(candidate.id) + '">' + t('show') + '</button>' + rowAction + '</div></div>';
+	        }).join('') + '</div>';
+	      }
+	      function renderCastingCandidateDrawer() {
+	        return renderDetail();
+	      }
+	      function renderCastingDetail() {
+	        var casting = castings.find(function (item) { return item.id === selectedCastingId; });
+	        if (!casting) return renderCastingList();
+	        var tabs = [['applications', 'applicationsTab'], ['candidates', 'castingCandidatesTab'], ['invitations', 'invitationsTab']];
+	        var terminal = ['closed', 'cancelled', 'archived'].includes(casting.status);
+	        var manage = castingStatusValue(casting) === 'draft' ? '<button class="primary" data-casting-manage="publish">' + t('publishCasting') + '</button>' : '<button class="secondary" data-casting-manage="close">' + t('closeCasting') + '</button>';
+	        var lifecycleActions = terminal ? '' : '<button class="secondary" id="editCasting">' + t('editCasting') + '</button>' + manage + '<button class="danger" data-casting-manage="cancel">' + t('cancelCasting') + '</button>';
+	        var invitationModes = castingTab === 'invitations' ? '<div class="actions"><button class="' + (invitationView === 'invite' ? 'primary' : 'secondary') + '" data-invitation-view="invite">' + t('inviteView') + '</button><button class="' + (invitationView === 'awaiting' ? 'primary' : 'secondary') + '" data-invitation-view="awaiting">' + t('awaitingView') + '</button></div>' : '';
+	        return '<section class="castingPage"><div class="castingHeader"><div><button class="secondary" id="backToCastings">← ' + t('castingsPage') + '</button><h3>' + esc(casting.title) + '</h3><span class="castingStatus ' + esc(castingStatusValue(casting)) + '">' + esc(castingStatusLabel(casting)) + '</span></div><div class="actions">' + lifecycleActions + '</div></div>' + (castingNotice ? '<div class="notice">' + esc(castingNotice) + '</div>' : '') + renderCastingCounts(casting) + '<div class="castingTabs">' + tabs.map(function (tab) { return '<button class="castingTab' + (castingTab === tab[0] ? ' active' : '') + '" data-casting-tab="' + tab[0] + '">' + t(tab[1]) + '</button>'; }).join('') + '</div>' +
+	          (!castingWorkspace ? '<div class="panel castingEmpty">' + t('castingDetailsUnavailable') + '</div>' : invitationModes + renderCastingFilters() + renderCastingCandidateRows() + '<section class="castingMessage"><h4>' + t('castingMessage') + '</h4><textarea id="castingBulkMessage" placeholder="' + t('messageText') + '"></textarea><div class="actions">' + (castingTab === 'invitations' && invitationView === 'invite' ? '<button class="primary" id="inviteCastingSelected">' + t('inviteSelected') + '</button>' : '') + '<button class="secondary" id="messageCastingSelected">' + t('send') + '</button><span id="castingBulkResult" class="muted"></span></div></section>') + renderCastingCandidateDrawer() + '</section>';
+	      }
+	      function renderCastingsPage() {
+	        return castingView === 'form' ? renderCastingForm() : castingView === 'detail' ? renderCastingDetail() : renderCastingList();
+	      }
       function bindFilters() {
         document.querySelectorAll('[data-filter-toggle]').forEach(function (el) {
           el.onclick = function () {
@@ -1336,10 +1552,11 @@ function candidateAdminHtml() {
             '<button class="miniButton" data-custom-action="remove" data-custom-id="' + esc(item.id) + '">' + t('deleteAction') + '</button></div></div>';
         }).join('') + '</div></section>';
       }
-      function renderDetail() {
-        var candidate = filtered.find(function (item) { return item.id === selectedId; });
-        if (!candidate) return '';
-        var isPendingPage = activePage === 'pending';
+	      function renderDetail() {
+	        var candidate = filtered.find(function (item) { return item.id === selectedId; }) || candidates.find(function (item) { return item.id === selectedId; }) || (castingWorkspaceCandidates(castingTab).find(function (item) { return item.id === selectedId; }));
+	        if (!candidate) return '';
+	        var isPendingPage = activePage === 'pending';
+	        var isCastingApplication = activePage === 'castings' && castingTab === 'applications';
         var portrait = candidate.portraitPhotoPath || candidate.photoPath;
         var mf = getMediaFields();
         var media = mf.filter(function (item) { return candidate[item[0]] || (item[0] === 'portraitPhotoPath' && candidate.photoPath); }).map(function (item) {
@@ -1357,8 +1574,10 @@ function candidateAdminHtml() {
           (media ? '<section class="media">' + media + '</section>' : '<p class="notice">' + t('noMedia') + '</p>') +
           renderRatingControl(candidate) +
           renderLabelsSection(candidate) +
-          renderCommentsSection(candidate) +
-          renderCustomModeration(candidate) +
+	          renderCommentsSection(candidate) +
+	          renderCustomModeration(candidate) +
+	          (isCastingApplication ? '<section class="profileSection"><h4>' + t('profileDecision') + '</h4><div class="castingDecisionRow"><button class="secondary" data-profile-only="approve">' + t('approveProfile') + '</button><button class="secondary" data-profile-only="reject">' + t('rejectProfile') + '</button></div><select id="castingProfileDecision"><option value="unchanged">' + t('keepProfile') + '</option><option value="approve">' + t('approveProfile') + '</option><option value="reject">' + t('rejectProfile') + '</option></select><div class="castingDecisionRow"><button class="primary" data-casting-decision="accept">' + t('acceptCasting') + '</button><button class="danger" data-casting-decision="reject">' + t('rejectCasting') + '</button></div><span id="castingDecisionResult" class="muted"></span></section>' : '') +
+	          (activePage === 'castings' ? '<section class="castingMessage"><h4>' + t('castingMessage') + '</h4><textarea id="castingSingleMessage" placeholder="' + t('messagePlaceholder') + '"></textarea><button class="primary" id="sendCastingSingle">' + t('send') + '</button><span id="castingSingleResult" class="muted"></span></section>' : '') +
           '<div><p class="filterLabel">' + t('messageTelegram') + '</p><textarea id="singleText" placeholder="' + t('messagePlaceholder') + '">' + esc(draftMessages[candidate.id] || '') + '</textarea><div class="actions"><button class="primary" id="sendSingle">' + t('send') + '</button><span class="muted" id="singleResult"></span></div></div><div class="actions">' +
           (isPendingPage ? '<button class="primary" id="approve">' + t('approve') + '</button><button class="danger" id="reject">' + t('reject') + '</button>' : '') +
           (editingProfileId === candidate.id ? '' : '<button class="secondary" id="editProfile">' + t('editProfile') + '</button>') +
@@ -1372,7 +1591,7 @@ function candidateAdminHtml() {
         document.querySelectorAll('[data-id]').forEach(function (row) {
           row.onclick = function () { selectedId = row.dataset.id; editingProfileId = ''; renderApp(); };
         });
-        var candidate = filtered.find(function (item) { return item.id === selectedId; });
+	        var candidate = filtered.find(function (item) { return item.id === selectedId; }) || candidates.find(function (item) { return item.id === selectedId; }) || castingWorkspaceCandidates(castingTab).find(function (item) { return item.id === selectedId; });
         if (!candidate) return;
         var approve = document.getElementById('approve');
         var reject = document.getElementById('reject');
@@ -1618,7 +1837,7 @@ function candidateAdminHtml() {
           }
         };
       }
-      function bindMessagingPanel() {
+	      function bindMessagingPanel() {
         var selectAllRecipients = document.getElementById('selectAllRecipients');
         var clearSelected = document.getElementById('clearSelected');
         var sendBulk = document.getElementById('sendBulk');
@@ -1697,9 +1916,172 @@ function candidateAdminHtml() {
           } finally {
             sendCasting.disabled = false;
           }
-        };
-      }
-      function bindNavigation() {
+	        };
+	      }
+	      async function loadCastingWorkspace(castingId) {
+	        castingWorkspace = null;
+	        try {
+	          castingWorkspace = await api('/api/castings/' + encodeURIComponent(castingId) + '/workspace');
+	        } catch (error) {
+	          if (error.status !== 404 && error.status !== 501) throw error;
+	        }
+	        renderApp();
+	      }
+	      function captureCastingDraft() {
+	        [['castingTitle','title'],['castingBody','body'],['castingStart','startsAt'],['castingEnd','endsAt']].forEach(function (item) {
+	          var input = document.getElementById(item[0]);
+	          if (input) castingDraft[item[1]] = input.value;
+	        });
+	      }
+	      async function submitCastingForm(status) {
+	        captureCastingDraft();
+	        var output = document.getElementById('castingResult');
+	        try {
+	          var path = selectedCastingId ? '/api/castings/' + encodeURIComponent(selectedCastingId) + '/manage' : '/api/castings';
+	          var payload = Object.assign({ operationId: newOperationId('casting'), sendNow: false, status: 'draft' }, castingDraft);
+	          if (selectedCastingId) payload.action = 'edit';
+	          var result = await postJson(path, payload);
+	          selectedCastingId = (result.casting || result).id;
+	          if (status === 'published') {
+	            result = await postJson('/api/castings/' + encodeURIComponent(selectedCastingId) + '/manage', {
+	              action: 'publish',
+	              audiences: ['channel', 'eligible_bot_users'],
+	              language: lang,
+	              operationId: newOperationId('casting-publish')
+	            });
+	            castingNotice = castingDeliveryNotice(result.delivery);
+	          }
+	          castingDraft = { title: '', body: '', startsAt: '', endsAt: '' };
+	          castingView = 'detail';
+	          await load();
+	          await loadCastingWorkspace(selectedCastingId);
+	        } catch (error) {
+	          output.textContent = error.message;
+	        }
+	      }
+	      function bindCastingsPage() {
+	        if (selectedId) bindTableAndDetail();
+	        var newButton = document.getElementById('newCasting');
+	        if (newButton) newButton.onclick = function () { selectedCastingId = ''; castingNotice = ''; castingDraft = { title: '', body: '', startsAt: '', endsAt: '' }; castingView = 'form'; renderApp(); };
+	        document.querySelectorAll('[data-open-casting]').forEach(function (button) {
+	          button.onclick = function () {
+	            selectedCastingId = button.dataset.openCasting; castingNotice = ''; castingView = 'detail'; castingTab = 'applications'; castingSelection = []; renderApp();
+	            loadCastingWorkspace(selectedCastingId).catch(function (error) { window.alert(error.message); });
+	          };
+	        });
+	        var back = document.getElementById('backToCastings');
+	        if (back) back.onclick = function () { castingView = 'list'; selectedCastingId = ''; castingWorkspace = null; castingNotice = ''; selectedId = ''; renderApp(); };
+	        var edit = document.getElementById('editCasting');
+	        if (edit) edit.onclick = function () {
+	          var casting = castings.find(function (item) { return item.id === selectedCastingId; });
+	          castingDraft = { title: casting.title || '', body: casting.body || '', startsAt: String(casting.startsAt || '').slice(0,16), endsAt: String(casting.endsAt || '').slice(0,16) };
+	          castingView = 'form'; renderApp();
+	        };
+	        var save = document.getElementById('saveCastingDraft');
+	        if (save) save.onclick = function () { save.disabled = true; submitCastingForm('draft').finally(function () { save.disabled = false; }); };
+	        var publish = document.getElementById('publishCastingForm');
+	        if (publish) publish.onclick = function () { publish.disabled = true; submitCastingForm('published').finally(function () { publish.disabled = false; }); };
+	        document.querySelectorAll('[data-casting-manage]').forEach(function (button) {
+	          button.onclick = async function () {
+	            button.disabled = true;
+	            try {
+	              var payload = { action: button.dataset.castingManage, operationId: newOperationId('casting-manage') };
+	              if (payload.action === 'publish') {
+	                payload.audiences = ['channel', 'eligible_bot_users'];
+	                payload.language = lang;
+	              }
+	              var result = await postJson('/api/castings/' + encodeURIComponent(selectedCastingId) + '/manage', payload);
+	              castingNotice = payload.action === 'publish' ? castingDeliveryNotice(result.delivery) : castingStatusLabel(result.casting || { status: payload.action === 'close' ? 'closed' : 'cancelled' });
+	              await load();
+	            }
+	            catch (error) { window.alert(error.message); button.disabled = false; }
+	          };
+	        });
+	        document.querySelectorAll('[data-casting-tab]').forEach(function (button) { button.onclick = function () { castingTab = button.dataset.castingTab; castingSelection = []; selectedId = ''; renderApp(); }; });
+	        document.querySelectorAll('[data-invitation-view]').forEach(function (button) { button.onclick = function () { invitationView = button.dataset.invitationView; castingSelection = []; renderApp(); }; });
+	        [['castingSearch','q'],['castingCity','city'],['castingGender','gender']].forEach(function (item) {
+	          var input = document.getElementById(item[0]);
+	          if (input) input.oninput = input.onchange = function () { castingFilters[item[1]] = input.value; renderApp(); };
+	        });
+	        document.querySelectorAll('[data-casting-select]').forEach(function (input) {
+	          input.onchange = function () {
+	            if (input.checked && !castingSelection.includes(input.dataset.castingSelect)) castingSelection.push(input.dataset.castingSelect);
+	            if (!input.checked) castingSelection = castingSelection.filter(function (id) { return id !== input.dataset.castingSelect; });
+	          };
+	        });
+	        document.querySelectorAll('[data-casting-candidate]').forEach(function (button) { button.onclick = function () { selectedId = button.dataset.castingCandidate; renderApp(); }; });
+	        document.querySelectorAll('[data-casting-participant-remove]').forEach(function (button) {
+	          button.onclick = async function () {
+	            button.disabled = true;
+	            try {
+	              await api('/api/castings/' + encodeURIComponent(selectedCastingId) + '/participants/' + encodeURIComponent(button.dataset.castingParticipantRemove), { method: 'DELETE' });
+	              castingNotice = t('participantRemoved');
+	              castingSelection = [];
+	              selectedId = '';
+	              await load();
+	              await loadCastingWorkspace(selectedCastingId);
+	            } catch (error) {
+	              castingNotice = error.message;
+	              renderApp();
+	            }
+	          };
+	        });
+	        document.querySelectorAll('[data-casting-invitation-cancel]').forEach(function (button) {
+	          button.onclick = async function () {
+	            button.disabled = true;
+	            try {
+	              await api('/api/castings/' + encodeURIComponent(selectedCastingId) + '/invitations/' + encodeURIComponent(button.dataset.castingInvitationCancel) + '/cancel', { method: 'POST' });
+	              castingNotice = t('invitationCancelled');
+	              castingSelection = [];
+	              selectedId = '';
+	              await load();
+	              await loadCastingWorkspace(selectedCastingId);
+	            } catch (error) {
+	              castingNotice = error.message;
+	              renderApp();
+	            }
+	          };
+	        });
+	        var close = document.getElementById('closeCastingDrawer');
+	        if (close) close.onclick = function () { selectedId = ''; renderApp(); };
+	        var openProfile = document.getElementById('openCastingProfile');
+	        if (openProfile) openProfile.onclick = function () { window.open('/candidate-profile/' + encodeURIComponent(selectedId), '_blank', 'noopener'); };
+	        document.querySelectorAll('[data-casting-decision]').forEach(function (button) {
+	          button.onclick = async function () {
+	            var output = document.getElementById('castingDecisionResult'); button.disabled = true;
+	            try {
+	              await postJson('/api/castings/' + encodeURIComponent(selectedCastingId) + '/decisions', { candidateId: selectedId, castingDecision: button.dataset.castingDecision, profileDecision: document.getElementById('castingProfileDecision').value, operationId: newOperationId('casting-decision') });
+	              selectedId = ''; await loadCastingWorkspace(selectedCastingId);
+	            } catch (error) { output.textContent = error.message; button.disabled = false; }
+	          };
+	        });
+	        document.querySelectorAll('[data-profile-only]').forEach(function (button) {
+	          button.onclick = async function () {
+	            var output = document.getElementById('castingDecisionResult'); button.disabled = true;
+	            try { await api('/api/candidates/' + encodeURIComponent(selectedId) + '/' + button.dataset.profileOnly, { method: 'POST' }); output.textContent = t(button.dataset.profileOnly === 'approve' ? 'approveProfile' : 'rejectProfile') + ' ✓'; await loadCastingWorkspace(selectedCastingId); }
+	            catch (error) { output.textContent = error.message; button.disabled = false; }
+	          };
+	        });
+	        var invite = document.getElementById('inviteCastingSelected');
+	        if (invite) invite.onclick = async function () {
+	          invite.disabled = true;
+	          try { await postJson('/api/castings/' + encodeURIComponent(selectedCastingId) + '/invitations', { candidateIds: castingSelection, operationId: newOperationId('casting-invite') }); castingSelection = []; await loadCastingWorkspace(selectedCastingId); }
+	          catch (error) { document.getElementById('castingBulkResult').textContent = error.message; invite.disabled = false; }
+	        };
+	        function bindCastingMessage(buttonId, textareaId, resultId, ids) {
+	          var button = document.getElementById(buttonId);
+	          if (!button) return;
+	          button.onclick = async function () {
+	            button.disabled = true;
+	            try { await postJson('/api/castings/' + encodeURIComponent(selectedCastingId) + '/messages', { audience: castingTab, candidateIds: ids(), operationId: newOperationId('casting-message'), text: document.getElementById(textareaId).value.trim() }); document.getElementById(resultId).textContent = t('send') + ' ✓'; }
+	            catch (error) { document.getElementById(resultId).textContent = error.message; }
+	            finally { button.disabled = false; }
+	          };
+	        }
+	        bindCastingMessage('messageCastingSelected', 'castingBulkMessage', 'castingBulkResult', function () { return castingSelection; });
+	        bindCastingMessage('sendCastingSingle', 'castingSingleMessage', 'castingSingleResult', function () { return [selectedId]; });
+	      }
+	      function bindNavigation() {
         document.querySelectorAll('[data-page]').forEach(function (button) {
           button.onclick = function () {
             activePage = button.dataset.page;
@@ -1715,18 +2097,23 @@ function candidateAdminHtml() {
         if (!authenticated) return renderLogin();
         captureDrafts();
         document.body.style.overflow = selectedId ? 'hidden' : '';
-        var isPosts = activePage === 'posts';
-        var isPending = activePage === 'pending';
-        var isCandidates = activePage === 'candidates';
-        var pageTitle = isPosts ? t('postsPage') : isPending ? t('pendingPage') : t('candidatesPage');
-        var body = isPosts
-          ? renderPostsPage()
-          : (isCandidates ? renderFilters() : renderApplicationLabelFilter()) + '<section class="layout">' + renderTable() + renderDetail() + '</section>';
+	        var isPosts = activePage === 'posts';
+	        var isPending = activePage === 'pending';
+	        var isCandidates = activePage === 'candidates';
+	        var isCastings = activePage === 'castings';
+	        var pageTitle = isCastings ? t('castingsPage') : isPosts ? t('postsPage') : isPending ? t('pendingPage') : t('candidatesPage');
+	        var body = isCastings
+	          ? renderCastingsPage()
+	          : isPosts
+	          ? renderPostsPage()
+	          : (isCandidates ? renderFilters() : renderApplicationLabelFilter()) + '<section class="layout">' + renderTable() + renderDetail() + '</section>';
         var exportAction = isCandidates ? '<button class="secondary" id="export">' + t('export') + '</button>' : '';
         var langBtns = ['ru','uz','en'].map(function(l) { return '<button type="button" class="langBtn' + (lang === l ? ' active' : '') + '" data-lang="' + l + '">' + l.toUpperCase() + '</button>'; }).join('');
-        root.innerHTML = '<main class="app"><aside class="sidebar"><div class="brand">' + (logoDataUri ? '<img class="logoMark" src="' + logoDataUri + '" alt="FACE Production">' : '<div class="mark">FP</div>') + '<div><strong>FACE Production</strong><p class="muted">' + t('brand') + '</p></div></div><button class="nav ' + (isPending ? 'active' : '') + '" data-page="pending">' + t('pendingPage') + '</button><button class="nav ' + (isCandidates ? 'active' : '') + '" data-page="candidates">' + t('candidatesPage') + '</button><button class="nav ' + (isPosts ? 'active' : '') + '" data-page="posts">' + t('postsPage') + '</button><div class="langRow">' + langBtns + '</div></aside><section class="workspace"><header class="topbar"><div><p class="muted">' + t('title') + '</p><h2>' + pageTitle + '</h2></div><div class="actions"><button class="secondary" id="refresh">' + t('refresh') + '</button>' + exportAction + '<button class="secondary" id="logout">' + t('logout') + '</button></div></header>' + body + '</section></main>';
+	        root.innerHTML = '<main class="app"><aside class="sidebar"><div class="brand">' + (logoDataUri ? '<img class="logoMark" src="' + logoDataUri + '" alt="FACE Production">' : '<div class="mark">FP</div>') + '<div><strong>FACE Production</strong><p class="muted">' + t('brand') + '</p></div></div><button class="nav ' + (isPending ? 'active' : '') + '" data-page="pending">' + t('pendingPage') + '</button><button class="nav ' + (isCandidates ? 'active' : '') + '" data-page="candidates">' + t('candidatesPage') + '</button><button class="nav ' + (isCastings ? 'active' : '') + '" data-page="castings">' + t('castingsPage') + '</button><button class="nav ' + (isPosts ? 'active' : '') + '" data-page="posts">' + t('postsPage') + '</button><div class="langRow">' + langBtns + '</div></aside><section class="workspace"><header class="topbar"><div><p class="muted">' + t('title') + '</p><h2>' + pageTitle + '</h2></div><div class="actions"><button class="secondary" id="refresh">' + t('refresh') + '</button>' + exportAction + '<button class="secondary" id="logout">' + t('logout') + '</button></div></header>' + body + '</section></main>';
         bindNavigation();
-        if (isPosts) {
+	        if (isCastings) {
+	          bindCastingsPage();
+	        } else if (isPosts) {
           bindMessagingPanel();
         } else {
           if (isCandidates || (isPending && labels.length)) bindFilters();
@@ -1745,7 +2132,7 @@ function candidateAdminHtml() {
         });
       }
       load();
-      setInterval(function () { if (authenticated && activePage !== 'posts' && !hasActiveEditor() && !selectedId) load(); }, 5000);
+	      setInterval(function () { if (authenticated && activePage !== 'posts' && activePage !== 'castings' && !hasActiveEditor() && !selectedId) load(); }, 5000);
     })();
   </script>
 </body>
@@ -2368,12 +2755,12 @@ export async function routeRequest(request, response) {
 
   if (request.method === 'GET' && url.pathname === '/api/castings') {
     requireAdminWebToken(request)
-    sendJson(response, 200, { castings: await listCastings() })
+    sendJson(response, 200, { castings: await listCastingsWithCounts() })
     return
   }
 
   if (request.method === 'POST' && url.pathname === '/api/castings') {
-    requireAdminWebToken(request)
+    const admin = requireAdminWebToken(request)
     const body = await readJson(request)
     const title = String(body.title ?? '').trim()
     const castingBody = String(body.body ?? '').trim()
@@ -2412,33 +2799,40 @@ export async function routeRequest(request, response) {
 
     const casting = await createCasting({
       body: castingBody,
+      createdBy: admin.id,
       endsAt,
       id: `CAST-${operationId}`,
       startsAt,
       status: body.status ?? 'active',
       targetCandidateIds,
       title,
+      updatedBy: admin.id,
     })
-    let delivery = { failed: [], sent: [] }
+    let delivery = { failed: [], failedCount: 0, queued: [], queuedCount: 0, sent: [], sentCount: 0 }
 
     if (body.sendNow !== false) {
-      const candidates = eligibleMessagingCandidates(await listCandidates(), targetCandidateIds)
-      delivery = await sendCandidateMessages(
-        candidates,
-        (candidate) => formatCastingMessage(casting, candidate),
-        'web_admin.casting_post',
+      const publication = await publishCasting({
+        actor: admin.id,
+        audiences: ['channel', 'eligible_bot_users'],
+        castingId: casting.id,
         operationId,
-        { parse_mode: 'HTML' },
-      )
+      })
+      delivery = {
+        ...delivery,
+        queued: publication.queued,
+        queuedCount: publication.queued.length,
+        skipped: publication.skipped,
+      }
     }
 
     await recordAuditEvent({
       action: 'web_admin.casting_created',
-      actor: 'web_admin',
+      ...adminAuditFields(admin),
       candidateCount: targetCandidateIds.length,
       castingId: casting.id,
+      operationId,
       outcome: 'created',
-      sentCount: delivery.sent.length,
+      queuedCount: delivery.queuedCount,
     })
 
     sendJson(response, 200, {
@@ -2446,6 +2840,359 @@ export async function routeRequest(request, response) {
       delivery,
       ok: true,
     })
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/castings/channel') {
+    requireAdminWebToken(request)
+    sendJson(response, 200, { channel: await getCastingChannelConfig(), ok: true })
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/castings/channel') {
+    const admin = requireSuperAdminWebToken(request)
+    const body = await readJson(request)
+    const channel = await updateCastingChannelConfig({
+      displayName: body.displayName,
+      enabled: body.enabled,
+      telegramChatId: body.telegramChatId,
+    }, admin.id)
+    await recordAuditEvent({
+      action: 'casting.channel_config_updated',
+      ...adminAuditFields(admin),
+      outcome: 'updated',
+    })
+    sendJson(response, 200, { channel, ok: true })
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/castings/channel/health') {
+    requireAdminWebToken(request)
+    const channel = await getCastingChannelConfig()
+    if (!channel.telegramChatId) {
+      sendJson(response, 200, { channel, healthy: false, ok: true })
+      return
+    }
+
+    try {
+      const [chat, bot] = await Promise.all([
+        telegramProvider.call('getChat', { chat_id: channel.telegramChatId }),
+        telegramProvider.getMe(),
+      ])
+      const membership = await telegramProvider.call('getChatMember', {
+        chat_id: channel.telegramChatId,
+        user_id: bot.id,
+      })
+      const administrator = ['administrator', 'creator'].includes(membership.status)
+      const canPostMessages = membership.status === 'creator' || membership.can_post_messages === true
+      const canEditMessages = membership.status === 'creator' || membership.can_edit_messages === true
+      const healthy = administrator && canPostMessages
+      const updated = await recordCastingChannelHealth({
+        errorCode: healthy ? '' : 'channel_post_permission_missing',
+        healthy,
+      })
+      sendJson(response, 200, {
+        canEditMessages,
+        canPostMessages,
+        channel: updated,
+        chat,
+        healthy,
+        membershipStatus: membership.status,
+        ok: true,
+      })
+    } catch (error) {
+      const updated = await recordCastingChannelHealth({
+        errorCode: error.code ?? error.name,
+        healthy: false,
+      })
+      sendJson(response, 200, {
+        channel: updated,
+        error: error.message,
+        healthy: false,
+        ok: true,
+      })
+    }
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/castings/outbox') {
+    requireSuperAdminWebToken(request)
+    sendJson(response, 200, { events: await listCastingOutboxEvents(), ok: true })
+    return
+  }
+
+  const castingWorkspaceRoute = url.pathname.match(/^\/api\/castings\/([^/]+)\/workspace$/)
+  if (request.method === 'GET' && castingWorkspaceRoute) {
+    requireAdminWebToken(request)
+    const workspace = await getCastingWorkspace(decodeURIComponent(castingWorkspaceRoute[1]))
+    if (!workspace) {
+      sendJson(response, 404, { error: 'Casting not found' })
+      return
+    }
+    sendJson(response, 200, workspace)
+    return
+  }
+
+  const castingManageRoute = url.pathname.match(/^\/api\/castings\/([^/]+)\/manage$/)
+  if (request.method === 'POST' && castingManageRoute) {
+    const admin = requireAdminWebToken(request)
+    const castingId = decodeURIComponent(castingManageRoute[1])
+    const body = await readJson(request)
+    const action = String(body.action ?? '').trim()
+    const operationId = requireOperationId(body.operationId)
+    const before = await findCasting(castingId)
+    if (!before) {
+      sendJson(response, 404, { error: 'Casting not found' })
+      return
+    }
+
+    let casting
+    let delivery = { failed: [], failedCount: 0, queued: [], queuedCount: 0, sent: [], sentCount: 0 }
+    if (action === 'publish') {
+      const publication = await publishCasting({
+        actor: admin.id,
+        audiences: Array.isArray(body.audiences) ? body.audiences : ['channel', 'eligible_bot_users'],
+        castingId,
+        language: body.language,
+        operationId,
+      })
+      casting = publication.casting
+      delivery = {
+        ...delivery,
+        queued: publication.queued,
+        queuedCount: publication.queued.length,
+        skipped: publication.skipped,
+      }
+    } else {
+      casting = await manageCasting(castingId, action, body, admin.id)
+    }
+
+    await recordAuditEvent({
+      action: `casting.${action}`,
+      ...adminAuditFields(admin),
+      after: casting?.status,
+      before: before.status,
+      castingId,
+      operationId,
+      outcome: casting?.version === before.version ? 'unchanged' : 'updated',
+      queuedCount: delivery.queuedCount,
+    })
+    sendJson(response, 200, { casting, delivery, ok: true })
+    return
+  }
+
+  const castingInvitationsRoute = url.pathname.match(/^\/api\/castings\/([^/]+)\/invitations$/)
+  if (request.method === 'POST' && castingInvitationsRoute) {
+    const admin = requireAdminWebToken(request)
+    const castingId = decodeURIComponent(castingInvitationsRoute[1])
+    const body = await readJson(request)
+    const operationId = requireOperationId(body.operationId)
+    const result = await inviteCandidatesToCasting({
+      actor: admin.id,
+      candidateIds: body.candidateIds,
+      castingId,
+      operationId,
+    })
+    if (!result.casting) {
+      sendJson(response, 404, { error: 'Casting not found' })
+      return
+    }
+    await recordAuditEvent({
+      action: 'casting.invitations_created',
+      ...adminAuditFields(admin),
+      castingId,
+      invitedCount: result.invited.length,
+      operationId,
+      outcome: 'queued',
+      skippedCount: result.skipped.length,
+    })
+    sendJson(response, 200, { ...result, ok: true, queuedCount: result.invited.length })
+    return
+  }
+
+  const castingDecisionsRoute = url.pathname.match(/^\/api\/castings\/([^/]+)\/decisions$/)
+  if (request.method === 'POST' && castingDecisionsRoute) {
+    const admin = requireAdminWebToken(request)
+    const castingId = decodeURIComponent(castingDecisionsRoute[1])
+    const body = await readJson(request)
+    const operationId = requireOperationId(body.operationId)
+    const candidateId = String(body.candidateId ?? '').trim()
+    const castingDecision = String(body.castingDecision ?? '').trim()
+    const profileDecision = String(body.profileDecision ?? 'unchanged').trim()
+    if (!['accept', 'reject'].includes(castingDecision)) {
+      sendJson(response, 400, { error: 'castingDecision must be accept or reject' })
+      return
+    }
+    if (!['unchanged', 'approve', 'reject'].includes(profileDecision)) {
+      sendJson(response, 400, { error: 'profileDecision must be unchanged, approve, or reject' })
+      return
+    }
+
+    const decision = await applyCastingAndProfileDecision({
+      actor: admin.id,
+      candidateId,
+      castingDecision,
+      castingId,
+      profileDecision,
+    })
+    if (!decision) {
+      sendJson(response, 404, { error: 'Casting or candidate not found' })
+      return
+    }
+    const { candidate, castingResult, previousCandidate: beforeCandidate } = decision
+    const notificationEvents = []
+    if (isCandidateReachableForDirectMessage(candidate)) {
+      const castingNotification = await enqueueCastingOutboxEvent({
+        castingId,
+        eventType: 'casting.decision',
+        operationId: `${operationId}:casting-decision`,
+        payload: {
+          candidateId,
+          castingId,
+          status: castingResult.participation.status,
+        },
+        recipientKey: candidateId,
+      })
+      notificationEvents.push(castingNotification.event)
+      if (profileDecision !== 'unchanged' && candidate.status !== beforeCandidate.status) {
+        const profileNotification = await enqueueCastingOutboxEvent({
+          castingId,
+          eventType: 'casting.profile_decision',
+          operationId: `${operationId}:profile-decision`,
+          payload: { candidateId, castingId, status: candidate.status },
+          recipientKey: candidateId,
+        })
+        notificationEvents.push(profileNotification.event)
+      }
+    }
+
+    await recordAuditEvent({
+      action: 'casting.decision_updated',
+      ...adminAuditFields(admin),
+      castingDecision,
+      castingId,
+      candidateId,
+      nextParticipationStatus: castingResult.participation?.status,
+      nextProfileStatus: candidate.status,
+      operationId,
+      outcome: castingResult.changed || candidate.status !== beforeCandidate.status ? 'updated' : 'unchanged',
+      participationId: castingResult.participation?.id,
+      previousParticipationStatus: decision.previousParticipation?.status ?? null,
+      previousProfileStatus: beforeCandidate.status,
+      profileDecision,
+      queuedNotificationCount: notificationEvents.length,
+    })
+    sendJson(response, 200, {
+      candidate,
+      casting: castingResult.casting,
+      changed: castingResult.changed || candidate.status !== beforeCandidate.status,
+      delivery: {
+        queued: notificationEvents,
+        queuedCount: notificationEvents.length,
+      },
+      ok: true,
+      participation: castingResult.participation,
+    })
+    return
+  }
+
+  const castingMessagesRoute = url.pathname.match(/^\/api\/castings\/([^/]+)\/messages$/)
+  if (request.method === 'POST' && castingMessagesRoute) {
+    const admin = requireAdminWebToken(request)
+    const castingId = decodeURIComponent(castingMessagesRoute[1])
+    const body = await readJson(request)
+    const operationId = requireOperationId(body.operationId)
+    const text = String(body.text ?? '').trim()
+    const candidateIds = [...new Set((body.candidateIds ?? []).map(String).filter(Boolean))]
+    if (!text || candidateIds.length === 0) {
+      sendJson(response, 400, { error: 'Message text and at least one candidate are required' })
+      return
+    }
+    const casting = await findCasting(castingId)
+    if (!casting) {
+      sendJson(response, 404, { error: 'Casting not found' })
+      return
+    }
+
+    const queued = []
+    const skipped = []
+    for (const candidateId of candidateIds) {
+      const candidate = await findCandidate(candidateId)
+      if (!candidate || !isCandidateReachableForDirectMessage(candidate)) {
+        skipped.push({ candidateId, reason: 'candidate_unreachable' })
+        continue
+      }
+      const event = await enqueueCastingOutboxEvent({
+        castingId,
+        eventType: 'casting.context_message',
+        operationId: `${operationId}:${candidateId}`,
+        payload: {
+          audience: body.audience,
+          candidateId,
+          castingId,
+          castingTitle: casting.title,
+          text,
+        },
+        recipientKey: candidateId,
+      })
+      queued.push(event.event)
+    }
+    await recordAuditEvent({
+      action: 'casting.context_messages_queued',
+      ...adminAuditFields(admin),
+      castingId,
+      operationId,
+      outcome: 'queued',
+      queuedCount: queued.length,
+      skippedCount: skipped.length,
+    })
+    sendJson(response, 200, { ok: true, queued, queuedCount: queued.length, skipped })
+    return
+  }
+
+  const castingInvitationCancelRoute = url.pathname.match(
+    /^\/api\/castings\/([^/]+)\/invitations\/([^/]+)\/cancel$/,
+  )
+  if (request.method === 'POST' && castingInvitationCancelRoute) {
+    const admin = requireAdminWebToken(request)
+    const castingId = decodeURIComponent(castingInvitationCancelRoute[1])
+    const candidateId = decodeURIComponent(castingInvitationCancelRoute[2])
+    const existing = await findCastingParticipation(castingId, candidateId)
+    if (!existing) {
+      sendJson(response, 404, { error: 'Casting invitation not found' })
+      return
+    }
+    if (existing.source !== 'invitation' || existing.status !== 'invited') {
+      sendJson(response, 409, { error: 'Only a pending invitation can be cancelled' })
+      return
+    }
+    const result = await setCastingApplicationStatus({
+      actor: admin.id,
+      candidateId,
+      castingId,
+      status: 'cancelled',
+    })
+    sendJson(response, result.participation ? 200 : 404, { ...result, ok: Boolean(result.participation) })
+    return
+  }
+
+  const castingParticipantRemoveRoute = url.pathname.match(
+    /^\/api\/castings\/([^/]+)\/participants\/([^/]+)$/,
+  )
+  if (request.method === 'DELETE' && castingParticipantRemoveRoute) {
+    const admin = requireAdminWebToken(request)
+    const castingId = decodeURIComponent(castingParticipantRemoveRoute[1])
+    const candidateId = decodeURIComponent(castingParticipantRemoveRoute[2])
+    const result = await removeCastingParticipant({ actor: admin.id, candidateId, castingId })
+    await recordAuditEvent({
+      action: 'casting.participant_removed',
+      ...adminAuditFields(admin),
+      candidateId,
+      castingId,
+      outcome: result.changed ? 'updated' : 'unchanged',
+      participationId: result.participation?.id,
+    })
+    sendJson(response, result.participation ? 200 : 404, { ...result, ok: Boolean(result.participation) })
     return
   }
 
@@ -2738,6 +3485,12 @@ if (isDirectRun()) {
       })
     }
   })
+  const stopCastingOutbox = (
+    Boolean(config.telegramBotToken)
+    && process.env.DATABASE_URL
+  )
+    ? startCastingOutboxProcessor()
+    : () => {}
 
   server.listen(config.port, config.host, () => {
     console.log(`FACE Platform API listening on http://${config.host}:${config.port}`)
@@ -2751,6 +3504,7 @@ if (isDirectRun()) {
 
     shuttingDown = true
     console.log(`${signal} received; draining HTTP server`)
+    stopCastingOutbox()
 
     server.close((error) => {
       if (error) {

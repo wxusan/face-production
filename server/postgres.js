@@ -256,8 +256,94 @@ async function _runSchemaInit() {
         updated_at timestamptz NOT NULL DEFAULT now()
       )
     `)
+    await client.query("ALTER TABLE castings ADD COLUMN IF NOT EXISTS public_token text")
+    await client.query("ALTER TABLE castings ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'web_admin'")
+    await client.query('ALTER TABLE castings ADD COLUMN IF NOT EXISTS published_at timestamptz')
+    await client.query('ALTER TABLE castings ADD COLUMN IF NOT EXISTS closed_at timestamptz')
+    await client.query('ALTER TABLE castings ADD COLUMN IF NOT EXISTS cancelled_at timestamptz')
+    await client.query('ALTER TABLE castings ADD COLUMN IF NOT EXISTS created_by text')
+    await client.query('ALTER TABLE castings ADD COLUMN IF NOT EXISTS updated_by text')
+    await client.query('ALTER TABLE castings ADD COLUMN IF NOT EXISTS version integer NOT NULL DEFAULT 1')
+    await client.query(`
+      UPDATE castings
+      SET public_token = 'legacy-' || md5(id)
+      WHERE public_token IS NULL OR public_token = ''
+    `)
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS castings_public_token_idx ON castings (public_token)')
     await client.query('CREATE INDEX IF NOT EXISTS castings_status_idx ON castings (status)')
     await client.query('CREATE INDEX IF NOT EXISTS castings_starts_at_idx ON castings (starts_at)')
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS casting_participations (
+        id text PRIMARY KEY,
+        casting_id text NOT NULL REFERENCES castings(id) ON DELETE CASCADE,
+        candidate_id text NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+        source text NOT NULL CHECK (source IN ('self_apply', 'invitation', 'admin_added')),
+        status text NOT NULL CHECK (
+          status IN ('applied', 'invited', 'selected', 'rejected', 'declined', 'withdrawn', 'removed', 'cancelled')
+        ),
+        profile_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+        application_message text,
+        created_by text,
+        updated_by text,
+        decided_by text,
+        invited_at timestamptz,
+        responded_at timestamptz,
+        decided_at timestamptz,
+        removed_at timestamptz,
+        data jsonb NOT NULL DEFAULT '{}'::jsonb,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (casting_id, candidate_id)
+      )
+    `)
+    await client.query(
+      'CREATE INDEX IF NOT EXISTS casting_participations_casting_status_idx ON casting_participations (casting_id, status)',
+    )
+    await client.query(
+      'CREATE INDEX IF NOT EXISTS casting_participations_candidate_idx ON casting_participations (candidate_id, updated_at DESC)',
+    )
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS casting_outbox (
+        id text PRIMARY KEY,
+        operation_id text NOT NULL UNIQUE,
+        event_type text NOT NULL,
+        casting_id text REFERENCES castings(id) ON DELETE CASCADE,
+        participation_id text REFERENCES casting_participations(id) ON DELETE SET NULL,
+        recipient_key text,
+        status text NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending', 'processing', 'sent', 'failed', 'cancelled')),
+        payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+        attempt_count integer NOT NULL DEFAULT 0,
+        available_at timestamptz NOT NULL DEFAULT now(),
+        claimed_at timestamptz,
+        sent_at timestamptz,
+        last_error_code text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `)
+    await client.query(
+      'CREATE INDEX IF NOT EXISTS casting_outbox_ready_idx ON casting_outbox (status, available_at, created_at)',
+    )
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS casting_channel_config (
+        channel_key text PRIMARY KEY,
+        telegram_chat_id text,
+        display_name text,
+        enabled boolean NOT NULL DEFAULT false,
+        health_status text NOT NULL DEFAULT 'unconfigured'
+          CHECK (health_status IN ('unconfigured', 'unknown', 'healthy', 'unhealthy')),
+        last_checked_at timestamptz,
+        last_error_code text,
+        updated_by text,
+        data jsonb NOT NULL DEFAULT '{}'::jsonb,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `)
+    await client.query('ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS casting_id text')
+    await client.query('ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS participation_id text')
+    await client.query('CREATE INDEX IF NOT EXISTS audit_events_casting_idx ON audit_events (casting_id, at)')
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')

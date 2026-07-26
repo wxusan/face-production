@@ -2,7 +2,9 @@ import { mkdir, readFile, appendFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { hasPostgres, query } from './postgres.js'
 
-const auditPath = resolve(process.cwd(), 'var/audit-log.jsonl')
+const auditPath = resolve(
+  process.env.AUDIT_LOG_PATH ?? resolve(process.cwd(), 'var/audit-log.jsonl'),
+)
 
 export async function recordAuditEvent(event) {
   const entry = {
@@ -16,17 +18,21 @@ export async function recordAuditEvent(event) {
         INSERT INTO audit_events (
           action,
           candidate_id,
+          casting_id,
+          participation_id,
           actor,
           actor_telegram_id,
           outcome,
           data,
           at
         )
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
       `,
       [
         entry.action,
         entry.candidateId ?? null,
+        entry.castingId ?? null,
+        entry.participationId ?? null,
         entry.actor ?? null,
         entry.actorTelegramId ? String(entry.actorTelegramId) : null,
         entry.outcome ?? null,

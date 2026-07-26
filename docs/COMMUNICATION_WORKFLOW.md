@@ -15,10 +15,15 @@ The Candidates page now supports three outbound Telegram workflows:
    - Broadcasts send only to selected candidates who have Telegram chat IDs and approved/verified status.
    - Empty selection sends zero messages.
 
-3. Casting post
-   - Admin writes a casting title, body, start date, and end date.
-   - The casting is saved in storage.
-   - If sent immediately, it is sent only to selected approved/verified candidates.
+3. Casting workflow
+   - Castings have their own page and are no longer composed on Posts.
+   - Admin saves a draft, then publishes it to the configured Telegram channel
+     and eligible approved candidates through the bot.
+   - Channel announcements open the private bot through a secure casting link.
+   - Private announcements include an idempotent Apply button.
+   - Applications, selected candidates, and invitations are managed separately.
+   - Messages sent from a casting identify the casting in the candidate's
+     selected language.
 
 ## Candidate Bot Menu
 
@@ -32,7 +37,10 @@ When updating a profile, the bot walks through the full form again. If an existi
 ## Storage
 
 - Candidates remain in the candidate repository.
-- Casting posts are stored separately in `castings`.
+- Castings are stored in `castings`; candidate participation is stored once per
+  candidate and casting in `casting_participations`.
+- Casting publication, invitations, decisions, and contextual messages use the
+  durable `casting_outbox`.
 - Postgres is used when `DATABASE_URL` is configured.
 - Local JSON fallback is used without Postgres.
 
@@ -43,3 +51,6 @@ When updating a profile, the bot walks through the full form again. If an existi
 - Telegram broadcasts skip candidates that are not approved/verified.
 - Empty selection does not mean "send to everyone."
 - Every send attempt records an audit event.
+- Repeated casting buttons and repeated publication operations are idempotent.
+- A FACE profile decision and a casting decision never change each other unless
+  the admin explicitly selects a combined action.
