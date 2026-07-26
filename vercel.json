@@ -1,25 +1,10 @@
 {
-  "buildCommand": "echo 'FACE portal is served by Railway through Vercel rewrites.'",
-  "rewrites": [
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "echo 'FACE portal is served by Railway through Vercel proxy routing.'",
+  "routes": [
     {
-      "source": "/api/:path*",
-      "destination": "https://face-production-staging.up.railway.app/api/:path*"
-    },
-    {
-      "source": "/candidate-profile/:path*",
-      "destination": "https://face-production-staging.up.railway.app/candidate-profile/:path*"
-    },
-    {
-      "source": "/assets/:path*",
-      "destination": "https://face-production-staging.up.railway.app/assets/:path*"
-    },
-    {
-      "source": "/",
-      "destination": "https://face-production-staging.up.railway.app/"
-    },
-    {
-      "source": "/:path*",
-      "destination": "https://face-production-staging.up.railway.app/:path*"
+      "src": "/(.*)",
+      "dest": "https://face-production-staging.up.railway.app/$1"
     }
   ]
 }
