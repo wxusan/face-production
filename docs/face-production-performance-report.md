@@ -55,10 +55,10 @@ requests each (45 requests per route).
 
 | Area | p50 | p75 | p95 | Response |
 | --- | ---: | ---: | ---: | ---: |
-| Health | 1.63 ms | 1.69 ms | 2.69 ms | 349 B |
-| Admin shell | 1.81 ms | 1.90 ms | 2.32 ms | 135,334 B |
-| Candidate admin load | 9.02 ms | 9.60 ms | 17.29 ms | 232,757 B |
-| Casting list | 1.52 ms | 1.54 ms | 1.96 ms | 117 B |
+| Health | 1.56 ms | 1.66 ms | 1.84 ms | 349 B |
+| Admin shell | 1.78 ms | 1.83 ms | 3.18 ms | 136,238 B |
+| Candidate admin load | 8.69 ms | 9.25 ms | 16.78 ms | 232,705 B |
+| Casting list | 1.50 ms | 1.54 ms | 1.91 ms | 117 B |
 
 Browser verification measured private candidate search at 340 ms including the
 300 ms debounce. The URL remained `/`, with no search value in it. The mutation
@@ -69,14 +69,15 @@ and proved that a rapid second call did not execute the task twice.
 
 | Area | p50 change | p75 change | p95 change | Size change |
 | --- | ---: | ---: | ---: | ---: |
-| Health | 0.09 ms slower (5.8%) | 0.03 ms slower (1.8%) | 0.46 ms slower (20.6%) | unchanged |
-| Admin shell | 0.09 ms faster (4.7%) | 0.07 ms faster (3.6%) | 0.20 ms faster (7.9%) | 47,687 B smaller (26.1%) |
-| Candidate admin load | 34.78 ms faster (79.4%) | 34.91 ms faster (78.4%) | 36.73 ms faster (68.0%) | 2,071,600 B smaller (89.9%) |
-| Casting list | 0.04 ms slower (2.7%) | 0.03 ms faster (1.9%) | 0.02 ms slower (1.0%) | 97 B larger for page metadata |
+| Health | 0.02 ms slower (1.3%) | unchanged | 0.39 ms faster (17.5%) | unchanged |
+| Admin shell | 0.12 ms faster (6.3%) | 0.14 ms faster (7.1%) | 0.66 ms slower (26.2%) | 46,783 B smaller (25.6%) |
+| Candidate admin load | 35.11 ms faster (80.2%) | 35.26 ms faster (79.2%) | 37.24 ms faster (68.9%) | 2,071,652 B smaller (89.9%) |
+| Casting list | 0.02 ms slower (1.4%) | 0.03 ms faster (1.9%) | 0.03 ms faster (1.5%) | 97 B larger for page metadata |
 
-The health p95 percentage is amplified by sub-millisecond local variation and is
-not an important authenticated user flow; the absolute p95 is 2.69 ms. Every
-important measured flow stayed within the 15% regression guard.
+The local shell p95 percentage is amplified by a 0.66 ms change at localhost scale;
+its p50 and p75 improved, and its absolute p95 is 3.18 ms. Hosted user-path
+measurements are the release guard for the public shell. Every important hosted
+flow stayed within the 15% regression guard.
 
 ## Score out of 100
 

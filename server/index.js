@@ -2459,6 +2459,13 @@ function mediaContentType(kind, candidate) {
   return 'image/jpeg'
 }
 
+let cachedCandidateAdminHtml
+
+function getCachedCandidateAdminHtml() {
+  cachedCandidateAdminHtml ??= candidateAdminHtml()
+  return cachedCandidateAdminHtml
+}
+
 function eligibleMessagingCandidates(candidates, candidateIds) {
   if (Array.isArray(candidateIds) && candidateIds.length === 0) {
     return []
@@ -3795,7 +3802,7 @@ export async function routeRequest(request, response) {
   }
 
   if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-    sendHtml(response, 200, candidateAdminHtml(), {
+    sendHtml(response, 200, getCachedCandidateAdminHtml(), {
       cacheControl: 'public, max-age=0, s-maxage=300, stale-while-revalidate=86400',
     })
     return
