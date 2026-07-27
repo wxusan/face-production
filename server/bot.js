@@ -25,7 +25,10 @@ import {
   updateCandidateStatus,
 } from './candidateRepository.js'
 import { candidateDecisionMessage } from './candidateDecisionMessages.js'
-import { listApprovedCustomValues } from './profileManagementRepository.js'
+import {
+  listApprovedCustomValues,
+  registerCandidateCustomValues,
+} from './profileManagementRepository.js'
 import { getRequiredExampleMedia } from './exampleMedia.js'
 import {
   isWithinTelegramFileLimit,
@@ -1831,6 +1834,13 @@ async function saveProfile(session) {
   session.data = saved
   session.replacingCandidateId = saved.id
   session.awaitingUserApproval = false
+  try {
+    await registerCandidateCustomValues([saved])
+  } catch (error) {
+    console.warn('Candidate custom-value registration failed', {
+      code: error?.code ?? error?.name ?? 'unknown',
+    })
+  }
   await notifyAdmin(saved)
   return saved
 }

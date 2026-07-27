@@ -91,6 +91,29 @@ async function readPostgresCastings() {
   return result.rows.map(rowToCasting)
 }
 
+async function readPostgresCastingPage({ limit, offset }) {
+  const result = await query(
+    `
+      SELECT *
+      FROM castings
+      ORDER BY created_at DESC, id DESC
+      LIMIT $1
+      OFFSET $2
+    `,
+    [limit + 1, offset],
+  )
+  const items = result.rows.slice(0, limit).map(rowToCasting)
+  return {
+    items,
+    pageInfo: {
+      hasMore: result.rows.length > limit,
+      limit,
+      nextOffset: offset + items.length,
+      offset,
+    },
+  }
+}
+
 async function findPostgresCasting(castingId) {
   const result = await query(
     `
@@ -243,6 +266,30 @@ async function writeStoredCastings(castings) {
 
 export async function listCastings() {
   return readStoredCastings()
+}
+
+export async function listCastingPage(options = {}) {
+  const requestedLimit = Number(options.limit)
+  const requestedOffset = Number(options.offset)
+  const limit = Math.min(100, Math.max(1, Number.isInteger(requestedLimit) ? requestedLimit : 50))
+  const offset = Math.max(0, Number.isInteger(requestedOffset) ? requestedOffset : 0)
+
+  if (hasPostgres()) {
+    return readPostgresCastingPage({ limit, offset })
+  }
+
+  const castings = await readJsonCastings()
+  const page = castings.slice(offset, offset + limit + 1)
+  const items = page.slice(0, limit)
+  return {
+    items,
+    pageInfo: {
+      hasMore: page.length > limit,
+      limit,
+      nextOffset: offset + items.length,
+      offset,
+    },
+  }
 }
 
 export async function createCasting(casting) {

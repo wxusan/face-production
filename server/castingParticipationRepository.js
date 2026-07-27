@@ -160,6 +160,60 @@ export async function listCastingParticipations(castingId, filters = {}) {
   )
 }
 
+export async function listCastingParticipationPage(castingId, filters = {}) {
+  const source = filters.source ? assertCastingParticipationSource(filters.source) : undefined
+  const status = filters.status ? assertCastingParticipationStatus(filters.status) : undefined
+  const requestedLimit = Number(filters.limit)
+  const requestedOffset = Number(filters.offset)
+  const limit = Math.min(300, Math.max(1, Number.isInteger(requestedLimit) ? requestedLimit : 100))
+  const offset = Math.max(0, Number.isInteger(requestedOffset) ? requestedOffset : 0)
+
+  if (hasPostgres()) {
+    const result = await query(
+      `
+        SELECT *
+        FROM casting_participations
+        WHERE casting_id = $1
+          AND ($2::text IS NULL OR source = $2)
+          AND ($3::text IS NULL OR status = $3)
+        ORDER BY created_at ASC, id ASC
+        LIMIT $4
+        OFFSET $5
+      `,
+      [castingId, source ?? null, status ?? null, limit + 1, offset],
+    )
+    const items = result.rows.slice(0, limit).map(rowToParticipation)
+    return {
+      items,
+      pageInfo: {
+        hasMore: result.rows.length > limit,
+        limit,
+        nextOffset: offset + items.length,
+        offset,
+      },
+    }
+  }
+
+  const store = await readLocalStore()
+  const matching = store.participations.filter(
+    (item) =>
+      item.castingId === castingId
+      && (!source || item.source === source)
+      && (!status || item.status === status),
+  )
+  const page = matching.slice(offset, offset + limit + 1)
+  const items = page.slice(0, limit)
+  return {
+    items,
+    pageInfo: {
+      hasMore: page.length > limit,
+      limit,
+      nextOffset: offset + items.length,
+      offset,
+    },
+  }
+}
+
 async function insertPostgresParticipation(participation) {
   const result = await query(
     `
@@ -393,7 +447,17 @@ export async function restoreCastingParticipation({ candidateId, castingId, part
 }
 
 export async function castingParticipationCounts(castingId) {
-  const participations = await listCastingParticipations(castingId)
+  return (await castingParticipationCountsByCastingIds([castingId]))[castingId] ?? {
+    applications: 0,
+    awaiting: 0,
+    byStatus: {},
+    candidates: 0,
+    invitations: 0,
+    total: 0,
+  }
+}
+
+function summarizeParticipations(participations) {
   const byStatus = Object.fromEntries(
     participations.reduce((counts, item) => {
       counts.set(item.status, (counts.get(item.status) ?? 0) + 1)
@@ -409,4 +473,49 @@ export async function castingParticipationCounts(castingId) {
     invitations: participations.filter((item) => item.source === 'invitation').length,
     total: participations.length,
   }
+}
+
+export async function castingParticipationCountsByCastingIds(castingIds) {
+  const uniqueIds = [...new Set((castingIds ?? []).map(String).filter(Boolean))]
+  if (!uniqueIds.length) return {}
+
+  if (hasPostgres()) {
+    const result = await query(
+      `
+        SELECT casting_id, source, status, COUNT(*)::integer AS count
+        FROM casting_participations
+        WHERE casting_id = ANY($1::text[])
+        GROUP BY casting_id, source, status
+      `,
+      [uniqueIds],
+    )
+    const summaries = Object.fromEntries(uniqueIds.map((castingId) => [castingId, {
+      applications: 0,
+      awaiting: 0,
+      byStatus: {},
+      candidates: 0,
+      invitations: 0,
+      total: 0,
+    }]))
+    for (const row of result.rows) {
+      const count = Number(row.count ?? 0)
+      const summary = summaries[row.casting_id]
+      if (!summary) continue
+      summary.byStatus[row.status] = (summary.byStatus[row.status] ?? 0) + count
+      summary.total += count
+      if (row.status === 'applied') summary.applications += count
+      if (row.status === 'invited') summary.awaiting += count
+      if (row.status === 'selected') summary.candidates += count
+      if (row.source === 'invitation') summary.invitations += count
+    }
+    return summaries
+  }
+
+  const store = await readLocalStore()
+  return Object.fromEntries(
+    uniqueIds.map((castingId) => [
+      castingId,
+      summarizeParticipations(store.participations.filter((item) => item.castingId === castingId)),
+    ]),
+  )
 }

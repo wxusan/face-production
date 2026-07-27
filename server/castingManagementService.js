@@ -1,45 +1,58 @@
 import {
   findCandidate,
+  findCandidatesByIds,
   isCandidateEligibleForMessaging,
   listCandidates,
 } from './candidateRepository.js'
 import {
   findCasting,
+  listCastingPage,
   listCastings,
   transitionCastingStatus,
   updateCasting,
 } from './castingRepository.js'
 import {
   castingParticipationCounts,
-  listCastingParticipations,
+  castingParticipationCountsByCastingIds,
+  listCastingParticipationPage,
 } from './castingParticipationRepository.js'
 import { setCastingApplicationStatus } from './castingParticipationService.js'
 import { enqueueCastingOutboxEvent } from './castingOutboxRepository.js'
 import { getCastingChannelConfig } from './castingChannelRepository.js'
 
-async function participationWithCandidate(participation) {
-  return {
-    ...participation,
-    candidate: await findCandidate(participation.candidateId) ?? participation.profileSnapshot,
-  }
-}
-
 export async function listCastingsWithCounts() {
   const castings = await listCastings()
-  return Promise.all(
-    castings.map(async (casting) => ({
+  const counts = await castingParticipationCountsByCastingIds(castings.map((casting) => casting.id))
+  return castings.map((casting) => ({
+    ...casting,
+    counts: counts[casting.id],
+  }))
+}
+
+export async function listCastingPageWithCounts(options = {}) {
+  const page = await listCastingPage(options)
+  const counts = await castingParticipationCountsByCastingIds(page.items.map((casting) => casting.id))
+  return {
+    castings: page.items.map((casting) => ({
       ...casting,
-      counts: await castingParticipationCounts(casting.id),
+      counts: counts[casting.id],
     })),
-  )
+    pageInfo: page.pageInfo,
+  }
 }
 
 export async function getCastingWorkspace(castingId) {
   const casting = await findCasting(castingId)
   if (!casting) return undefined
 
-  const participations = await listCastingParticipations(castingId)
-  const enriched = await Promise.all(participations.map(participationWithCandidate))
+  const participationPage = await listCastingParticipationPage(castingId, { limit: 300 })
+  const participations = participationPage.items
+  const candidates = await findCandidatesByIds(participations.map((item) => item.candidateId))
+  const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]))
+  const enriched = participations.map((participation) => ({
+    ...participation,
+    candidate: candidatesById.get(participation.candidateId) ?? participation.profileSnapshot,
+  }))
   const active = enriched.filter((item) => !['removed', 'cancelled'].includes(item.status))
   const flattenCandidate = (item) => ({
     ...item.candidate,
@@ -58,6 +71,7 @@ export async function getCastingWorkspace(castingId) {
       counts: await castingParticipationCounts(castingId),
     },
     invitations: active.filter((item) => item.source === 'invitation'),
+    pageInfo: participationPage.pageInfo,
   }
 }
 

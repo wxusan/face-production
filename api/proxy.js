@@ -1,5 +1,6 @@
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
+import { performance } from 'node:perf_hooks'
 
 const RAILWAY_ORIGIN = 'https://face-production-staging.up.railway.app'
 const REQUEST_HEADERS_TO_SKIP = new Set([
@@ -67,17 +68,32 @@ function copyResponseHeaders(upstream, response) {
   }
 }
 
+function safeRouteName(method, pathname) {
+  const route = pathname
+    .replace(
+      /^\/api\/candidates\/(?!query(?:\/|$)|export\.csv(?:\/|$))[^/]+/,
+      '/api/candidates/:candidateId',
+    )
+    .replace(/^\/api\/castings\/[^/]+/, '/api/castings/:castingId')
+  return `${method} ${route}`
+}
+
 export default async function handler(request, response) {
+  const startedAt = performance.now()
   const upstreamPath = getUpstreamPath(request)
   const upstreamBody = getUpstreamBody(request)
   const upstreamHeaders = getUpstreamHeaders(request)
+  const route = safeRouteName(request.method, upstreamPath.pathname)
 
-  console.info('FACE API proxy request', {
+  console.info(JSON.stringify({
     hasAdminHeader: upstreamHeaders.has('x-face-admin-token'),
     hasBody: upstreamBody !== undefined,
+    level: 'info',
+    message: 'proxy_request_started',
     method: request.method,
-    path: upstreamPath.pathname,
-  })
+    requestId: request.headers['x-vercel-id'] ?? null,
+    route,
+  }))
 
   const upstream = await fetch(upstreamPath, {
     body: upstreamBody,
@@ -86,14 +102,23 @@ export default async function handler(request, response) {
     redirect: 'manual',
   })
 
-  console.info('FACE API proxy response', {
+  const proxyDuration = performance.now() - startedAt
+  console.info(JSON.stringify({
+    level: 'info',
+    message: 'proxy_request_completed',
     method: request.method,
-    path: upstreamPath.pathname,
+    ms: Number(proxyDuration.toFixed(2)),
+    route,
     status: upstream.status,
-  })
+  }))
 
   response.statusCode = upstream.status
   copyResponseHeaders(upstream, response)
+  const upstreamTiming = upstream.headers.get('server-timing')
+  response.setHeader(
+    'server-timing',
+    [upstreamTiming, `proxy;dur=${proxyDuration.toFixed(2)}`].filter(Boolean).join(', '),
+  )
 
   if (!upstream.body || request.method === 'HEAD') {
     response.end()

@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "echo 'FACE portal is served by Railway through Vercel proxy routing.'",
+  "regions": ["bom1"],
   "routes": [
     {
       "src": "/api/(?<path>.*)",

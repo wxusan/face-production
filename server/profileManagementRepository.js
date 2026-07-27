@@ -222,13 +222,25 @@ export function profileChanges(candidate, patch) {
 
 export async function listProfileLabels() {
   if (hasPostgres()) {
-    const result = await query('SELECT * FROM profile_labels ORDER BY lower(name), id')
+    const result = await query('SELECT * FROM profile_labels ORDER BY lower(name), id LIMIT 501')
     return result.rows.map(labelRow)
   }
 
   return (await readLocalState()).labels
     .slice()
     .sort((left, right) => left.name.localeCompare(right.name))
+}
+
+export async function localCandidateIdsForLabels(labelIds) {
+  if (hasPostgres()) return undefined
+  const selected = new Set((labelIds ?? []).map(String).filter(Boolean))
+  if (!selected.size) return undefined
+  const state = await readLocalState()
+  return [...new Set(
+    state.assignments
+      .filter((assignment) => selected.has(assignment.labelId))
+      .map((assignment) => assignment.candidateId),
+  )]
 }
 
 export async function createProfileLabel({ color, name }, actor) {
@@ -542,6 +554,7 @@ export async function listCustomTaxonomyValues({ includeRemoved = true } = {}) {
         FROM custom_taxonomy_values
         ${includeRemoved ? '' : "WHERE status <> 'removed'"}
         ORDER BY field, lower(value), id
+        LIMIT 501
       `,
     )
     return result.rows.map(customValueRow)
@@ -684,15 +697,32 @@ export async function moderateCustomTaxonomyValue(customValueId, action, options
   return { ...stored, affectedCount }
 }
 
-export async function enrichCandidatesForAdmin(candidates, actor) {
-  const labels = await listProfileLabels()
+export async function enrichCandidatesForAdmin(candidates, actor, providedLabels) {
+  const labels = providedLabels ?? await listProfileLabels()
   let assignments
   let comments
+  const candidateIds = candidates.map((candidate) => String(candidate.id)).filter(Boolean)
 
   if (hasPostgres()) {
+    if (!candidateIds.length) return []
     const [assignmentResult, commentResult] = await Promise.all([
-      query('SELECT candidate_id, label_id, assigned_by, assigned_at FROM candidate_profile_labels'),
-      query('SELECT * FROM candidate_comments ORDER BY created_at ASC, id ASC'),
+      query(
+        `
+          SELECT candidate_id, label_id, assigned_by, assigned_at
+          FROM candidate_profile_labels
+          WHERE candidate_id = ANY($1::text[])
+        `,
+        [candidateIds],
+      ),
+      query(
+        `
+          SELECT *
+          FROM candidate_comments
+          WHERE candidate_id = ANY($1::text[])
+          ORDER BY created_at ASC, id ASC
+        `,
+        [candidateIds],
+      ),
     ])
     assignments = assignmentResult.rows.map((row) => ({
       assignedAt: row.assigned_at?.toISOString?.() ?? row.assigned_at,
@@ -711,11 +741,22 @@ export async function enrichCandidatesForAdmin(candidates, actor) {
   }
 
   const labelById = new Map(labels.map((label) => [label.id, label]))
+  const assignmentsByCandidate = new Map()
+  const commentsByCandidate = new Map()
+  for (const assignment of assignments) {
+    const values = assignmentsByCandidate.get(assignment.candidateId) ?? []
+    values.push(assignment)
+    assignmentsByCandidate.set(assignment.candidateId, values)
+  }
+  for (const comment of comments) {
+    const values = commentsByCandidate.get(comment.candidateId) ?? []
+    values.push(comment)
+    commentsByCandidate.set(comment.candidateId, values)
+  }
   return candidates.map((candidate) => ({
     ...candidate,
-    adminComments: comments.filter((comment) => comment.candidateId === candidate.id),
-    adminLabels: assignments
-      .filter((assignment) => assignment.candidateId === candidate.id)
+    adminComments: commentsByCandidate.get(candidate.id) ?? [],
+    adminLabels: (assignmentsByCandidate.get(candidate.id) ?? [])
       .map((assignment) => labelById.get(assignment.labelId))
       .filter(Boolean),
   }))

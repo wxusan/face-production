@@ -18,10 +18,12 @@
     "preview": "vite preview",
     "test:messaging": "node --test test/messaging-logic.test.js",
     "test:profile-management": "node --test test/profile-management.test.js test/profile-api.test.js",
+    "test:performance": "node --test test/performance-contract.test.js",
     "test:castings-management": "node --import ./test/helpers/register-casting-outbox-loader.mjs --test test/castings-api.test.js test/casting-publication-outbox.test.js test/casting-lifecycle-reliability.test.js",
     "test:ui": "node --test test/castings-ui.test.js",
     "test:telegram": "node --test test/messaging-logic.test.js test/message-lifecycle.test.js test/example-delivery.test.js test/example-media.test.js test/candidate-messaging-policy.test.js test/candidate-decision-messages.test.js test/casting-messages.test.js test/casting-bot-flow.test.js test/telegram-example-repository.test.js",
     "test:persistence-safety": "node scripts/test-persistence-safety.js",
+    "typecheck": "tsc -b --pretty false",
     "webhook:delete": "node scripts/delete-telegram-webhook.js",
     "webhook:set": "node scripts/set-telegram-webhook.js"
   },

@@ -119,6 +119,25 @@ async function _runSchemaInit() {
     await client.query('CREATE INDEX IF NOT EXISTS candidates_phone_idx ON candidates (phone)')
     await client.query('CREATE INDEX IF NOT EXISTS candidates_telegram_user_idx ON candidates (telegram_user_id)')
     await client.query('CREATE INDEX IF NOT EXISTS candidates_city_idx ON candidates (city)')
+    await client.query(
+      'CREATE INDEX IF NOT EXISTS candidates_status_updated_idx ON candidates (status, updated_at DESC, id DESC)',
+    )
+    await client.query('CREATE INDEX IF NOT EXISTS candidates_updated_idx ON candidates (updated_at DESC, id DESC)')
+    await client.query('CREATE INDEX IF NOT EXISTS candidates_data_gin_idx ON candidates USING gin (data)')
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS candidates_rating_name_idx
+      ON candidates (
+        (
+          CASE
+            WHEN COALESCE(data->>'rating', '') ~ '^[0-9]+([.][0-9]+)?$'
+            THEN (data->>'rating')::numeric
+            ELSE 0
+          END
+        ) DESC,
+        lower(COALESCE(name, '')),
+        id
+      )
+    `)
     await client.query(`
       CREATE TABLE IF NOT EXISTS profile_labels (
         id text PRIMARY KEY,
@@ -272,6 +291,7 @@ async function _runSchemaInit() {
     await client.query('CREATE UNIQUE INDEX IF NOT EXISTS castings_public_token_idx ON castings (public_token)')
     await client.query('CREATE INDEX IF NOT EXISTS castings_status_idx ON castings (status)')
     await client.query('CREATE INDEX IF NOT EXISTS castings_starts_at_idx ON castings (starts_at)')
+    await client.query('CREATE INDEX IF NOT EXISTS castings_created_idx ON castings (created_at DESC, id DESC)')
     await client.query(`
       CREATE TABLE IF NOT EXISTS casting_participations (
         id text PRIMARY KEY,
