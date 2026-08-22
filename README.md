@@ -1,81 +1,65 @@
-# FACE Production Talent Platform
+# Face Production
 
-Governed MVP foundation for a FACE Production casting and talent operations platform.
+One repository for the public Face Production website and the private casting dashboard. The applications share a workspace but remain independently runnable, buildable, and deployable.
 
-This first build is intentionally product-shaped: it contains an admin console, domain data model, risk controls, candidate moderation states, campaign approval gates, vendor dependency tracking, security governance, maintenance expectations, and migration planning.
+## Repository structure
 
-## Run Locally
+```text
+apps/
+  website/       Public multilingual website
+  dashboard/     Private casting operations dashboard and backend
+
+packages/
+  brand/         Shared brand tokens
+  ui/            Future shared interface components
+  types/         Shared cross-application types
+  api-client/    Future shared API client
+```
+
+## Local development
+
+Install all workspace dependencies from the repository root:
 
 ```bash
 npm install
+```
+
+Run only the public website:
+
+```bash
+npm run dev:website
+```
+
+Run only the dashboard:
+
+```bash
+npm run dev:dashboard
+```
+
+Run both applications:
+
+```bash
 npm run dev
 ```
 
-Run the secure backend in a second terminal:
+The dashboard backend and Telegram commands remain available from its workspace:
 
 ```bash
-npm run server
+npm run server --workspace=@face-production/dashboard
+npm run bot --workspace=@face-production/dashboard
 ```
 
-Run Telegram local polling when you want the bot to answer Telegram messages during development:
+## Builds
 
 ```bash
-npm run bot
+npm run build
+npm run build:website
+npm run build:dashboard
 ```
 
-Keep the web API running separately with Telegram polling disabled:
+## Deployment direction
 
-```bash
-TELEGRAM_ENABLE_POLLING=false npm run server
-```
+- `faceproduction.uz` → `apps/website`
+- `app.faceproduction.uz` → `apps/dashboard`
 
-Secrets live in `.env.local`, which is ignored by git. Use `.env.example` as the template.
-
-Local admin dashboard passcode in this development workspace:
-
-```text
-face-admin-local
-```
-
-## Current Product Slice
-
-- Candidate registry with validation, moderation, duplicate, consent, and blacklist signals.
-- Campaign governance with targeted campaign mode, response rate, fatigue risk, and human approval state.
-- Product analytics overview for growth, conversion, duplicate rate, and admin efficiency.
-- Secure backend shell with Telegram provider, admin-only authorization, audit events, and dry-run broadcast checks.
-- Real Telegram candidate registrations loaded into the web dashboard.
-- Candidate media review for full-body, closer shot, left profile, right profile, portrait photo, and intro video.
-- Web approve/reject actions that notify Telegram candidates when a chat is linked.
-- Recent audit events visible in the Governance tab.
-- Admin panel language: Russian by default, Uzbek optional.
-- Telegram bot languages: Russian, Uzbek, English.
-- Telegram registration captures name, phone, age, Uzbekistan region, gender, height, weight, talents, languages, appearance/look, five required photos, and intro video.
-- Telegram admin approval uses inline approve/reject buttons and writes audit events.
-- Candidate CSV export is available from the admin panel.
-- Governance queue for controlled feature and operating decisions.
-- Security rules for admin access, export permissions, child profile visibility, credential rotation, and incident response.
-- Vendor dependency register with required abstraction interfaces.
-- Migration path from local JSON/files to Supabase PostgreSQL and Storage, then platform-grade search, AI indexing, analytics, and automation.
-
-## Engineering Direction
-
-The platform must grow behind stable boundaries:
-
-- `CandidateRepository` for candidate records.
-- `StorageProvider` for media and backup storage.
-- `MessagingProvider` for Telegram and future channels.
-- `AiReviewProvider` for future AI suggestions that require human approval. AI is not part of the current MVP.
-- `AnalyticsProvider` for product and campaign reporting.
-- `AuditLogRepository` for sensitive admin action history.
-- `AdminAuthorizationService` for permission checks.
-
-No live architecture feature should be added without product prioritization and governance review.
-
-## Documentation
-
-- [Architecture](./docs/ARCHITECTURE.md)
-- [Governance](./docs/GOVERNANCE.md)
-- [Supabase Migration](./docs/SUPABASE_MIGRATION.md)
-- [Telegram Integration](./docs/TELEGRAM_INTEGRATION.md)
-- [Technical Decisions](./docs/TECHNICAL_DECISIONS.md)
-- [Vercel Deployment](./docs/VERCEL_DEPLOYMENT.md)
+Each application keeps its own deployment configuration and environment variables. Dashboard documentation is available in [`apps/dashboard/docs`](./apps/dashboard/docs).
