@@ -21,7 +21,7 @@ export const config = {
   port: Number(process.env.SERVER_PORT ?? 8787),
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? '',
   telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET ?? '',
-  publicAppUrl: process.env.PUBLIC_APP_URL ?? (process.env.VERCEL ? '' : 'http://localhost:5173'),
+  publicAppUrl: process.env.PUBLIC_APP_URL ?? (process.env.VERCEL ? '' : 'http://127.0.0.1:8787'),
 }
 
 export function getConfigStatus() {

@@ -1,3 +1,3 @@
 # Dashboard workspace
 
-This directory contains the existing FACE Production talent platform, backend, Telegram integration, deployment configuration, and operational documentation. Its behavior was preserved during the monorepo migration.
+This directory contains the FACE Production talent platform, backend, Telegram integration, deployment configuration, and operational documentation. The current dashboard UI is served directly by `server/index.js`; the retired Vite prototype is intentionally absent.

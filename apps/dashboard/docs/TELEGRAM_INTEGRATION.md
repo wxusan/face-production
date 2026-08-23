@@ -55,7 +55,7 @@ npm run bot
 Open the admin UI:
 
 ```text
-http://127.0.0.1:5173/
+http://127.0.0.1:8787/
 ```
 
 Development admin passcode:

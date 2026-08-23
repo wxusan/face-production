@@ -36,13 +36,15 @@ Run only the dashboard:
 npm run dev:dashboard
 ```
 
+The dashboard is served by its Node application at `http://127.0.0.1:8787`. There is one dashboard interface; the former Vite prototype has been removed.
+
 Run both applications:
 
 ```bash
 npm run dev
 ```
 
-The dashboard backend and Telegram commands remain available from its workspace:
+The dashboard server and Telegram commands also remain available directly from its workspace:
 
 ```bash
 npm run server --workspace=@face-production/dashboard
