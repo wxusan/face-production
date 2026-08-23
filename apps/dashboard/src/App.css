@@ -727,6 +727,49 @@ tr:last-child td {
   background: #f8fafc;
 }
 
+.briefDetail {
+  max-height: calc(100vh - 132px);
+  overflow: auto;
+}
+
+.adminSelect,
+.adminField input,
+.adminField textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--textStrong);
+  font: inherit;
+}
+
+.adminSelect { width: auto; }
+.adminField { display: grid; gap: 7px; }
+.adminField > span,
+.briefFact > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+.adminField textarea { resize: vertical; }
+.briefFact { display: grid; gap: 5px; padding: 13px; border-radius: 8px; background: var(--soft); }
+.briefFact p { margin: 0; color: var(--textStrong); line-height: 1.5; white-space: pre-wrap; }
+.briefAttachments { display: grid; gap: 7px; }
+.briefAttachments a { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; color: var(--textStrong); text-decoration: none; }
+.briefAttachments a span { color: var(--muted); font-size: 12px; }
+
+.adminInvitePanel { display: grid; gap: 18px; }
+.adminFormGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.adminCheck { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 9px 11px; border-radius: 7px; background: var(--soft); color: var(--textStrong); font-size: 13px; font-weight: 700; }
+.adminCheck input { width: 18px; height: 18px; accent-color: #1b6ca8; }
+.adminCards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.adminCard { display: grid; gap: 16px; }
+.adminRole { display: inline-block; margin-top: 5px; color: var(--muted); font-size: 12px; }
+.accessCodeBox { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 17px 18px; border: 1px solid #86efac; border-radius: 8px; background: #f0fdf4; }
+.accessCodeBox strong { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #14532d; overflow-wrap: anywhere; }
+
 .segmentedControl {
   display: inline-grid;
   grid-template-columns: repeat(2, minmax(100px, 1fr));
@@ -862,7 +905,8 @@ input:focus-visible {
   .campaignGrid,
   .vendorGrid,
   .principleGrid,
-  .maintenanceList {
+  .maintenanceList,
+  .adminCards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -905,6 +949,8 @@ input:focus-visible {
   .vendorGrid,
   .principleGrid,
   .maintenanceList,
+  .adminCards,
+  .adminFormGrid,
   .profileFacts,
   .rulesGrid {
     grid-template-columns: 1fr;

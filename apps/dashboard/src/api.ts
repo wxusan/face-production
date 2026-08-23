@@ -1,4 +1,4 @@
-const API_BASE = ''
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 export function getCandidateExportUrl(token: string) {
   return `${API_BASE}/api/candidates/export.csv?token=${encodeURIComponent(token)}`
@@ -76,6 +76,43 @@ export type AuditEvent = {
   outcome?: string
 }
 
+export type ApiBrief = {
+  id: string
+  status: 'new' | 'contacted' | 'qualified' | 'closed'
+  locale: 'ru' | 'en' | 'uz'
+  clientName: string
+  company?: string
+  phoneOrTelegram: string
+  email?: string
+  projectTitle?: string
+  projectType: string
+  rolesNeeded: string
+  shootingDate?: string
+  location?: string
+  budget?: string
+  usageRights?: string
+  referenceLinks?: string
+  notes?: string
+  internalNotes?: string
+  assignedTo?: string
+  attachments?: Array<{ name: string; contentType: string; size: number }>
+  createdAt: string
+  updatedAt: string
+}
+
+export type ApiAdmin = {
+  id: string
+  name: string
+  email?: string
+  role: 'super_admin' | 'admin'
+  status: 'active' | 'disabled'
+  telegramUserId?: string
+  telegramUsername?: string
+  telegramNotifications: boolean
+  telegramNotificationsAllowed: boolean
+  createdAt: string
+}
+
 type RequestOptions = {
   body?: unknown
   method?: string
@@ -128,4 +165,45 @@ export async function rejectCandidate(candidateId: string, token: string) {
 export async function listAuditEvents(token: string) {
   const data = await apiRequest<{ events: AuditEvent[] }>('/api/audit', { token })
   return data.events
+}
+
+export async function getAdminSession(token: string) {
+  const data = await apiRequest<{ admin: ApiAdmin }>('/api/session', { token })
+  return data.admin
+}
+
+export async function listApiBriefs(token: string) {
+  const data = await apiRequest<{ briefs: ApiBrief[] }>('/api/briefs', { token })
+  return data.briefs
+}
+
+export async function updateApiBrief(id: string, changes: Partial<ApiBrief>, token: string) {
+  const data = await apiRequest<{ brief: ApiBrief }>(`/api/briefs/${encodeURIComponent(id)}`, {
+    body: changes,
+    method: 'PATCH',
+    token,
+  })
+  return data.brief
+}
+
+export function getBriefAttachmentUrl(briefId: string, index: number, token: string) {
+  return `${API_BASE}/api/briefs/${encodeURIComponent(briefId)}/attachments/${index}?token=${encodeURIComponent(token)}`
+}
+
+export async function listApiAdmins(token: string) {
+  const data = await apiRequest<{ admins: ApiAdmin[] }>('/api/admins', { token })
+  return data.admins
+}
+
+export async function inviteApiAdmin(input: Partial<ApiAdmin>, token: string) {
+  return apiRequest<{ accessToken: string; admin: ApiAdmin }>('/api/admins', { body: input, method: 'POST', token })
+}
+
+export async function updateApiAdmin(id: string, changes: Partial<ApiAdmin>, token: string) {
+  const data = await apiRequest<{ admin: ApiAdmin }>(`/api/admins/${encodeURIComponent(id)}`, {
+    body: changes,
+    method: 'PATCH',
+    token,
+  })
+  return data.admin
 }

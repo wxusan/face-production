@@ -35,7 +35,7 @@ test("server-renders Russian as the default language", async () => {
   assert.match(html, /<html lang="ru">/i);
   assert.match(html, /ОТ БРИФА/);
   assert.match(html, /ДО БУКИНГА/);
-  assert.match(html, /ОТПРАВИТЬ БРИФ/);
+  assert.match(html, /ОТПРАВИТЬ ЗАЯВКУ/);
   assert.match(html, /СТАТЬ АРТИСТОМ/);
   assert.doesNotMatch(html, /codex-preview|Building your site|react-loading-skeleton/i);
 });
@@ -50,7 +50,7 @@ test("server-renders every supported language route", async () => {
   assert.match(russian, /<html lang="ru">/i);
   assert.match(english, /FROM BRIEF/);
   assert.match(english, /TO BOOKED/);
-  assert.match(uzbek, /BRIFDAN/);
+  assert.match(uzbek, /SO‘ROVDAN/);
   assert.match(uzbek, /TASDIQQACHA/);
 
   for (const html of [russian, english, uzbek]) {
@@ -58,4 +58,20 @@ test("server-renders every supported language route", async () => {
     assert.match(html, />EN<\/button>/);
     assert.match(html, />UZ<\/button>/);
   }
+});
+
+test("server-renders every localized brief form", async () => {
+  const [russian, english, uzbek] = await Promise.all([
+    renderedHtml("/ru/brief"),
+    renderedHtml("/en/brief"),
+    renderedHtml("/uz/brief"),
+  ]);
+
+  assert.match(russian, /РАССКАЖИТЕ/);
+  assert.match(russian, /О ВАС/);
+  assert.match(english, /TELL US ABOUT/);
+  assert.match(english, /ABOUT YOU/);
+  assert.match(uzbek, /LOYIHANGIZ/);
+  assert.match(uzbek, /KASTING SO‘ROVI/);
+  assert.match(uzbek, /SIZ HAQINGIZDA/);
 });

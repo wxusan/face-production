@@ -36,7 +36,7 @@ const siteCopy: Record<Locale, SiteCopy> = {
     nav: { work: "Работы", talent: "Артисты", contact: "Контакты", menu: "Меню", close: "Закрыть" },
     headline: ["ОТ БРИФА", "ДО БУКИНГА"],
     subtitle: ["Кастинг для кино,", "рекламы и культуры."],
-    sendBrief: "ОТПРАВИТЬ БРИФ",
+    sendBrief: "ОТПРАВИТЬ ЗАЯВКУ",
     applyAsTalent: "СТАТЬ АРТИСТОМ",
     steps: ["БРИФ", "ШОРТ-ЛИСТ", "БУКИНГ"],
     welcome: ["МЫ ИЩЕМ", "НОВЫЕ ТАЛАНТЫ."],
@@ -72,11 +72,11 @@ const siteCopy: Record<Locale, SiteCopy> = {
   },
   uz: {
     nav: { work: "Ishlar", talent: "Aktyorlar", contact: "Aloqa", menu: "Menyu", close: "Yopish" },
-    headline: ["BRIFDAN", "TASDIQQACHA"],
-    subtitle: ["Kino, reklama va madaniyat", "uchun aniq kasting."],
-    sendBrief: "BRIF YUBORISH",
+    headline: ["SO‘ROVDAN", "TASDIQQACHA"],
+    subtitle: ["Kino, reklama va madaniy loyihalar", "uchun aktyorlar kastingi."],
+    sendBrief: "KASTING SO‘ROVI",
     applyAsTalent: "AKTYOR BO‘LISH",
-    steps: ["BRIF", "SARALASH", "TASDIQ"],
+    steps: ["SO‘ROV", "SARALASH", "TASDIQ"],
     welcome: ["YANGI ISTE’DODLARNI", "QABUL QILAMIZ."],
     contact: {
       eyebrow: "ALOQA / KANALLAR",
@@ -85,7 +85,7 @@ const siteCopy: Record<Locale, SiteCopy> = {
       channels: [
         { code: "01 / BOT", name: "TELEGRAM-BOT", purpose: "Aktyor anketasi", action: "BOSHLASH" },
         { code: "02 / SOCIAL", name: "INSTAGRAM", purpose: "Ishlar va beksteyj", action: "KO‘RISH" },
-        { code: "03 / DIRECT", name: "TELEGRAM", purpose: "Brif va menejer bilan aloqa", action: "YOZISH" },
+        { code: "03 / DIRECT", name: "TELEGRAM", purpose: "Kasting so‘rovi va menejer bilan aloqa", action: "YOZISH" },
       ],
     },
   },
@@ -242,7 +242,7 @@ function ActionLink({ children, variant, href }: { children: React.ReactNode; va
   );
 }
 
-function Hero({ copy }: { copy: SiteCopy }) {
+function Hero({ copy, locale }: { copy: SiteCopy; locale: Locale }) {
   return (
     <main className="hero" id="top">
       <div className="hero-copy">
@@ -254,7 +254,7 @@ function Hero({ copy }: { copy: SiteCopy }) {
           {copy.subtitle[0]}<br />{copy.subtitle[1]}
         </p>
         <div className="hero-actions">
-          <ActionLink variant="solid" href="#manager-contact">{copy.sendBrief}</ActionLink>
+          <ActionLink variant="solid" href={`/${locale}/brief`}>{copy.sendBrief}</ActionLink>
           <div className="mobile-talent-action">
             <ActionLink variant="outline" href="#bot-contact">{copy.applyAsTalent}</ActionLink>
           </div>
@@ -364,7 +364,7 @@ export function FaceProductionPage({ initialLocale = "ru" }: { initialLocale?: L
   return (
     <div className="site-frame" data-locale={locale}>
       <Header copy={copy} locale={locale} onLanguageSelect={selectLanguage} />
-      <Hero copy={copy} />
+      <Hero copy={copy} locale={locale} />
       <ProcessSection copy={copy} />
       <ContactSection copy={copy} />
     </div>

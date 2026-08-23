@@ -16,11 +16,12 @@ const adminIds = parseAdminIds(process.env.TELEGRAM_ADMIN_ID)
 export const config = {
   adminId: adminIds[0] ?? '',
   adminIds,
-  adminWebToken: process.env.ADMIN_WEB_TOKEN ?? '',
+  adminWebToken: process.env.ADMIN_WEB_TOKEN ?? (process.env.VERCEL ? '' : 'face-admin-local'),
   enablePolling: process.env.TELEGRAM_ENABLE_POLLING === 'true',
   port: Number(process.env.SERVER_PORT ?? 8787),
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? '',
   telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET ?? '',
+  publicAppUrl: process.env.PUBLIC_APP_URL ?? (process.env.VERCEL ? '' : 'http://localhost:5173'),
 }
 
 export function getConfigStatus() {

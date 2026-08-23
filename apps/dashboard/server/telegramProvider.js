@@ -479,7 +479,7 @@ export async function handleTelegramUpdate(update) {
   const fromId = String(message.from.id)
   const chatId = message.chat.id
   const text = String(message.text ?? '').trim()
-  const role = isAdminTelegramId(fromId) ? 'admin' : 'candidate'
+  const role = await isAdminTelegramId(fromId) ? 'admin' : 'candidate'
 
   console.log(`Telegram update ${update.update_id}: ${role} ${fromId} -> ${text || '[non-text]'}`)
 

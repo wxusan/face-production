@@ -111,6 +111,44 @@ async function _runSchemaInit() {
     `)
     await client.query('CREATE INDEX IF NOT EXISTS castings_status_idx ON castings (status)')
     await client.query('CREATE INDEX IF NOT EXISTS castings_starts_at_idx ON castings (starts_at)')
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS briefs (
+        id text PRIMARY KEY,
+        status text NOT NULL DEFAULT 'new',
+        locale text NOT NULL DEFAULT 'ru',
+        client_name text NOT NULL,
+        company text,
+        contact text NOT NULL,
+        project_type text NOT NULL,
+        shooting_date text,
+        location text,
+        data jsonb NOT NULL DEFAULT '{}'::jsonb,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `)
+    await client.query('CREATE INDEX IF NOT EXISTS briefs_status_idx ON briefs (status)')
+    await client.query('CREATE INDEX IF NOT EXISTS briefs_created_at_idx ON briefs (created_at)')
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS admins (
+        id text PRIMARY KEY,
+        name text NOT NULL,
+        email text,
+        role text NOT NULL DEFAULT 'admin',
+        status text NOT NULL DEFAULT 'active',
+        token_hash text NOT NULL,
+        telegram_user_id text,
+        telegram_username text,
+        telegram_notifications boolean NOT NULL DEFAULT false,
+        telegram_notifications_allowed boolean NOT NULL DEFAULT false,
+        invited_by text,
+        data jsonb NOT NULL DEFAULT '{}'::jsonb,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `)
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS admins_single_super_admin_idx ON admins (role) WHERE role = \'super_admin\'')
+    await client.query('CREATE INDEX IF NOT EXISTS admins_telegram_user_idx ON admins (telegram_user_id)')
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')

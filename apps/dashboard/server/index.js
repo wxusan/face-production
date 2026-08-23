@@ -4,6 +4,10 @@ import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { handleBotUpdate } from './bot.js'
 import { createCasting, listCastings } from './castingRepository.js'
+import { createAdmin, listAdmins, updateAdmin } from './adminRepository.js'
+import { readBriefAttachment, saveBriefAttachments, validateBriefAttachments } from './briefAttachmentStorage.js'
+import { notifyAdminsAboutBrief } from './briefNotifications.js'
+import { createBrief, findBrief, listBriefs, setBriefAttachments, updateBrief } from './briefRepository.js'
 import { config, getConfigStatus } from './config.js'
 import { readAuditEvents, recordAuditEvent } from './auditLog.js'
 import {
@@ -13,7 +17,7 @@ import {
   updateCandidateMetadata,
   updateCandidateStatus,
 } from './candidateRepository.js'
-import { requireAdminWebToken } from './security.js'
+import { requireAdminWebToken, requireSuperAdminWebToken } from './security.js'
 import { talentTaxonomy } from './taxonomy.js'
 import {
   startTelegramPolling,
@@ -54,8 +58,8 @@ async function readJson(request) {
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, {
     'access-control-allow-headers': 'content-type,x-admin-token',
-    'access-control-allow-methods': 'GET,POST,OPTIONS',
-    'access-control-allow-origin': 'http://127.0.0.1:5173',
+    'access-control-allow-methods': 'GET,POST,PATCH,OPTIONS',
+    'access-control-allow-origin': '*',
     'content-type': 'application/json',
   })
   response.end(JSON.stringify(body, null, 2))
@@ -71,8 +75,8 @@ function sendHtml(response, statusCode, content) {
 function sendCsv(response, filename, content) {
   response.writeHead(200, {
     'access-control-allow-headers': 'content-type,x-admin-token',
-    'access-control-allow-methods': 'GET,POST,OPTIONS',
-    'access-control-allow-origin': 'http://127.0.0.1:5173',
+    'access-control-allow-methods': 'GET,POST,PATCH,OPTIONS',
+    'access-control-allow-origin': '*',
     'content-disposition': `attachment; filename="${filename}"`,
     'content-type': 'text/csv; charset=utf-8',
   })
@@ -1392,8 +1396,122 @@ export async function routeRequest(request, response) {
     return
   }
 
+  if (request.method === 'POST' && url.pathname === '/api/public/briefs') {
+    const body = await readJson(request)
+    const required = ['clientName', 'phoneOrTelegram', 'projectType', 'rolesNeeded']
+    const missing = required.filter((field) => !String(body[field] ?? '').trim())
+    if (missing.length) {
+      sendJson(response, 400, { error: `Missing required fields: ${missing.join(', ')}` })
+      return
+    }
+    validateBriefAttachments(body.attachments)
+
+    const brief = await createBrief({
+      locale: body.locale,
+      clientName: String(body.clientName).trim(),
+      company: String(body.company ?? '').trim(),
+      phoneOrTelegram: String(body.phoneOrTelegram).trim(),
+      email: String(body.email ?? '').trim(),
+      projectTitle: String(body.projectTitle ?? '').trim(),
+      projectType: String(body.projectType).trim(),
+      rolesNeeded: String(body.rolesNeeded).trim(),
+      shootingDate: String(body.shootingDate ?? '').trim(),
+      location: String(body.location ?? '').trim(),
+      budget: String(body.budget ?? '').trim(),
+      usageRights: String(body.usageRights ?? '').trim(),
+      referenceLinks: String(body.referenceLinks ?? '').trim(),
+      notes: String(body.notes ?? '').trim(),
+      source: 'website',
+    })
+    const attachments = await saveBriefAttachments(brief.id, body.attachments)
+    const savedBrief = attachments.length ? await setBriefAttachments(brief.id, attachments) : brief
+    await recordAuditEvent({ action: 'brief.created', briefId: brief.id, outcome: 'saved', source: 'website' })
+    const notification = await notifyAdminsAboutBrief(savedBrief)
+    sendJson(response, 201, {
+      id: brief.id,
+      notification,
+      ok: true,
+      responseTimeHours: 24,
+    })
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/session') {
+    const admin = await requireAdminWebToken(request)
+    const { tokenHash: _tokenHash, ...safeAdmin } = admin
+    sendJson(response, 200, { admin: safeAdmin })
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/briefs') {
+    await requireAdminWebToken(request)
+    sendJson(response, 200, { briefs: await listBriefs() })
+    return
+  }
+
+  const briefMatch = url.pathname.match(/^\/api\/briefs\/([^/]+)$/)
+  if (request.method === 'PATCH' && briefMatch) {
+    const admin = await requireAdminWebToken(request)
+    const brief = await updateBrief(decodeURIComponent(briefMatch[1]), await readJson(request), admin)
+    if (!brief) {
+      sendJson(response, 404, { error: 'Brief not found' })
+      return
+    }
+    await recordAuditEvent({ action: 'brief.updated', actor: admin.id, briefId: brief.id, outcome: 'saved' })
+    sendJson(response, 200, { brief, ok: true })
+    return
+  }
+
+  const briefAttachmentMatch = url.pathname.match(/^\/api\/briefs\/([^/]+)\/attachments\/(\d+)$/)
+  if (request.method === 'GET' && briefAttachmentMatch) {
+    const tokenFromQuery = url.searchParams.get('token')
+    if (tokenFromQuery) request.headers['x-admin-token'] = tokenFromQuery
+    await requireAdminWebToken(request)
+    const brief = await findBrief(decodeURIComponent(briefAttachmentMatch[1]))
+    const attachment = brief?.attachments?.[Number(briefAttachmentMatch[2])]
+    if (!attachment) {
+      sendJson(response, 404, { error: 'Attachment not found' })
+      return
+    }
+    const content = await readBriefAttachment(attachment)
+    response.writeHead(200, {
+      'content-disposition': `inline; filename="${String(attachment.name).replace(/"/g, '')}"`,
+      'content-length': content.length,
+      'content-type': attachment.contentType || 'application/octet-stream',
+    })
+    response.end(content)
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/admins') {
+    await requireAdminWebToken(request)
+    sendJson(response, 200, { admins: await listAdmins() })
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/admins') {
+    const superAdmin = await requireSuperAdminWebToken(request)
+    const created = await createAdmin(await readJson(request), superAdmin)
+    await recordAuditEvent({ action: 'admin.invited', actor: superAdmin.id, adminId: created.admin.id, outcome: 'created' })
+    sendJson(response, 201, { ...created, ok: true })
+    return
+  }
+
+  const adminMatch = url.pathname.match(/^\/api\/admins\/([^/]+)$/)
+  if (request.method === 'PATCH' && adminMatch) {
+    const actor = await requireAdminWebToken(request)
+    const admin = await updateAdmin(decodeURIComponent(adminMatch[1]), await readJson(request), actor)
+    if (!admin) {
+      sendJson(response, 404, { error: 'Admin not found' })
+      return
+    }
+    await recordAuditEvent({ action: 'admin.updated', actor: actor.id, adminId: admin.id, outcome: 'saved' })
+    sendJson(response, 200, { admin, ok: true })
+    return
+  }
+
   if (request.method === 'GET' && url.pathname === '/api/candidates') {
-    requireAdminWebToken(request)
+    await requireAdminWebToken(request)
     sendJson(response, 200, { candidates: await listCandidates() })
     return
   }
@@ -1405,7 +1523,7 @@ export async function routeRequest(request, response) {
       request.headers['x-admin-token'] = tokenFromQuery
     }
 
-    requireAdminWebToken(request)
+    await requireAdminWebToken(request)
     sendCsv(response, 'face-candidates.csv', candidatesToCsv(await listCandidates()))
     return
   }
@@ -1446,7 +1564,7 @@ export async function routeRequest(request, response) {
   }
 
   if (request.method === 'POST' && url.pathname === '/api/admin/notify') {
-    requireAdminWebToken(request)
+    await requireAdminWebToken(request)
     const body = await readJson(request)
 
     const message = String(body.text ?? '').trim()
@@ -1470,7 +1588,7 @@ export async function routeRequest(request, response) {
   }
 
   if (request.method === 'POST' && url.pathname === '/api/admin/broadcast-dry-run') {
-    requireAdminWebToken(request)
+    await requireAdminWebToken(request)
     const body = await readJson(request)
 
     const dryRun = await getBroadcastDryRun()
@@ -1493,7 +1611,7 @@ export async function routeRequest(request, response) {
   }
 
   if (request.method === 'POST' && url.pathname === '/api/admin/broadcast') {
-    requireAdminWebToken(request)
+    await requireAdminWebToken(request)
     const body = await readJson(request)
     const message = String(body.text ?? '').trim()
     const targetCandidateIds = Array.isArray(body.candidateIds)
@@ -1523,13 +1641,13 @@ export async function routeRequest(request, response) {
   }
 
   if (request.method === 'GET' && url.pathname === '/api/castings') {
-    requireAdminWebToken(request)
+    await requireAdminWebToken(request)
     sendJson(response, 200, { castings: await listCastings() })
     return
   }
 
   if (request.method === 'POST' && url.pathname === '/api/castings') {
-    requireAdminWebToken(request)
+    await requireAdminWebToken(request)
     const body = await readJson(request)
     const title = String(body.title ?? '').trim()
     const castingBody = String(body.body ?? '').trim()
@@ -1600,7 +1718,7 @@ export async function routeRequest(request, response) {
   const candidateAction = url.pathname.match(/^\/api\/candidates\/([^/]+)\/(approve|reject)$/)
 
   if (request.method === 'POST' && candidateAction) {
-    requireAdminWebToken(request)
+    await requireAdminWebToken(request)
 
     const [, candidateId, action] = candidateAction
     const nextStatus = action === 'approve' ? 'approved' : 'rejected'
@@ -1640,7 +1758,7 @@ export async function routeRequest(request, response) {
   const candidateRating = url.pathname.match(/^\/api\/candidates\/([^/]+)\/rating$/)
 
   if (request.method === 'POST' && candidateRating) {
-    requireAdminWebToken(request)
+    await requireAdminWebToken(request)
 
     const [, candidateId] = candidateRating
     const body = await readJson(request)
@@ -1679,7 +1797,7 @@ export async function routeRequest(request, response) {
       request.headers['x-admin-token'] = tokenFromQuery
     }
 
-    requireAdminWebToken(request)
+    await requireAdminWebToken(request)
 
     const [, candidateId] = candidatePhoto
     const candidate = await findCandidate(candidateId)
@@ -1703,7 +1821,7 @@ export async function routeRequest(request, response) {
       request.headers['x-admin-token'] = tokenFromQuery
     }
 
-    requireAdminWebToken(request)
+    await requireAdminWebToken(request)
 
     const [, candidateId, kind] = candidateMedia
     const candidate = await findCandidate(candidateId)
@@ -1721,7 +1839,7 @@ export async function routeRequest(request, response) {
   const candidateMessage = url.pathname.match(/^\/api\/candidates\/([^/]+)\/message$/)
 
   if (request.method === 'POST' && candidateMessage) {
-    requireAdminWebToken(request)
+    await requireAdminWebToken(request)
 
     const [, candidateId] = candidateMessage
     const candidate = await findCandidate(candidateId)
@@ -1766,7 +1884,7 @@ export async function routeRequest(request, response) {
       request.headers['x-admin-token'] = tokenFromQuery
     }
 
-    requireAdminWebToken(request)
+    await requireAdminWebToken(request)
     sendJson(response, 200, { events: await readAuditEvents() })
     return
   }
@@ -1780,7 +1898,7 @@ export async function routeRequest(request, response) {
       request.headers['x-admin-token'] = tokenFromQuery
     }
 
-    requireAdminWebToken(request)
+    await requireAdminWebToken(request)
 
     const [, candidateId] = profilePage
     const candidate = await findCandidate(decodeURIComponent(candidateId))

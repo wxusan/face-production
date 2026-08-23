@@ -30,7 +30,7 @@ const telegramChannelUrl = String(process.env.TELEGRAM_CHANNEL_URL ?? '').trim()
 const sessions = new Map()
 const exampleFileIdCache = new Map()
 
-if (!token) {
+if (!token && process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   throw new Error('TELEGRAM_BOT_TOKEN is missing')
 }
 
@@ -457,7 +457,9 @@ async function ensureBotReady({ deleteWebhook = false } = {}) {
 }
 
 // Kick off getMe eagerly so it's done before the first request arrives
-ensureBotReady().catch((err) => console.error('ensureBotReady background init failed:', err.message))
+if (token) {
+  ensureBotReady().catch((err) => console.error('ensureBotReady background init failed:', err.message))
+}
 
 async function hydrateSession(userId) {
   if (sessions.has(userId)) {

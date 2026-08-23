@@ -17,6 +17,9 @@ import {
   UserCheck,
   Users,
   BarChart3,
+  ClipboardList,
+  Copy,
+  UserCog,
 } from 'lucide-react'
 import './App.css'
 import {
@@ -24,16 +27,25 @@ import {
   getCandidateExportUrl,
   getCandidateMediaUrl,
   getHealth,
+  getAdminSession,
+  getBriefAttachmentUrl,
+  inviteApiAdmin,
+  listApiAdmins,
+  listApiBriefs,
   listApiCandidates,
   listAuditEvents,
   rejectCandidate,
+  updateApiAdmin,
+  updateApiBrief,
+  type ApiAdmin,
+  type ApiBrief,
   type AuditEvent,
 } from './api'
 import { mapApiCandidate } from './candidateMapper'
 import { candidates, type Candidate } from './platformData'
 
 type AdminLang = 'ru' | 'uz'
-type ViewId = 'overview' | 'candidates' | 'campaigns' | 'governance' | 'vendors'
+type ViewId = 'overview' | 'briefs' | 'candidates' | 'admins' | 'campaigns' | 'governance' | 'vendors'
 
 const text = {
   ru: {
@@ -131,6 +143,34 @@ const text = {
     tattoos: 'Татуировки',
     availability: 'Доступность',
     weight: 'Вес',
+    admins: 'Администраторы',
+    briefs: 'Новые заявки',
+    noBriefs: 'Новых заявок с сайта пока нет.',
+    client: 'Клиент',
+    project: 'Проект',
+    shoot: 'Съёмка',
+    contactInfo: 'Контакт',
+    rolesNeeded: 'Нужные роли',
+    budget: 'Бюджет',
+    usageRights: 'Права использования',
+    references: 'Референсы',
+    notes: 'Комментарий клиента',
+    internalNotes: 'Внутренние заметки',
+    attachments: 'Файлы',
+    save: 'Сохранить',
+    inviteAdmin: 'Пригласить администратора',
+    adminName: 'Имя администратора',
+    adminEmail: 'Email',
+    telegramId: 'Telegram ID',
+    telegramUsername: 'Telegram username',
+    allowNotifications: 'Разрешить Telegram-уведомления',
+    receiveNotifications: 'Получать уведомления о заявках',
+    accessCode: 'Одноразовый код доступа — скопируйте сейчас',
+    superAdmin: 'Супер-администратор',
+    regularAdmin: 'Администратор',
+    disabled: 'Отключён',
+    copy: 'Копировать',
+    adminOnly: 'Только супер-администратор может приглашать и отключать администраторов.',
   },
   uz: {
     active: 'Faol',
@@ -227,12 +267,42 @@ const text = {
     tattoos: 'Tatuirovka',
     availability: 'Vaqt',
     weight: 'Vazn',
+    admins: 'Administratorlar',
+    briefs: 'Yangi so‘rovlar',
+    noBriefs: 'Saytdan yangi kasting so‘rovlari hali kelmadi.',
+    client: 'Mijoz',
+    project: 'Loyiha',
+    shoot: 'Suratga olish',
+    contactInfo: 'Aloqa',
+    rolesNeeded: 'Kerakli rollar',
+    budget: 'Byudjet',
+    usageRights: 'Foydalanish huquqi',
+    references: 'Namunalar',
+    notes: 'Mijoz izohi',
+    internalNotes: 'Ichki izohlar',
+    attachments: 'Fayllar',
+    save: 'Saqlash',
+    inviteAdmin: 'Administrator taklif qilish',
+    adminName: 'Administrator ismi',
+    adminEmail: 'Email',
+    telegramId: 'Telegram ID',
+    telegramUsername: 'Telegram username',
+    allowNotifications: 'Telegram xabarlariga ruxsat berish',
+    receiveNotifications: 'Kasting so‘rovlari haqida xabar olish',
+    accessCode: 'Bir martalik kirish kodi — hozir nusxalang',
+    superAdmin: 'Bosh administrator',
+    regularAdmin: 'Administrator',
+    disabled: 'O‘chirilgan',
+    copy: 'Nusxalash',
+    adminOnly: 'Faqat bosh administrator yangi admin taklif qilishi va adminni o‘chirishi mumkin.',
   },
 }
 
 const navIcons: Record<ViewId, typeof Users> = {
   campaigns: MessageCircle,
+  briefs: ClipboardList,
   candidates: Users,
+  admins: UserCog,
   governance: ShieldCheck,
   overview: BarChart3,
   vendors: Cloud,
@@ -242,9 +312,14 @@ function App() {
   const [lang, setLang] = useState<AdminLang>(() => (localStorage.getItem('face-admin-lang') as AdminLang) || 'ru')
   const t = text[lang]
   const navigation = useMemo(() => [
+    { id: 'briefs' as ViewId, label: t.briefs },
     { id: 'candidates' as ViewId, label: t.candidates },
+    { id: 'admins' as ViewId, label: t.admins },
   ], [t])
-  const [activeView, setActiveView] = useState<ViewId>('candidates')
+  const [activeView, setActiveView] = useState<ViewId>(() => {
+    const requested = new URLSearchParams(window.location.search).get('view') as ViewId | null
+    return requested === 'briefs' || requested === 'admins' || requested === 'candidates' ? requested : 'briefs'
+  })
   const [apiStatus, setApiStatus] = useState<'checking' | 'connected' | 'offline'>('checking')
   const [adminToken, setAdminToken] = useState(() => localStorage.getItem('face-admin-token') ?? '')
   const [tokenInput, setTokenInput] = useState(adminToken)
@@ -255,6 +330,12 @@ function App() {
   const [query, setQuery] = useState('')
   const [selectedCandidate, setSelectedCandidate] = useState(candidates[0].id)
   const [campaignMode, setCampaignMode] = useState<'targeted' | 'broad'>('targeted')
+  const [sessionAdmin, setSessionAdmin] = useState<ApiAdmin | null>(null)
+  const [briefRows, setBriefRows] = useState<ApiBrief[]>([])
+  const [selectedBrief, setSelectedBrief] = useState(() => new URLSearchParams(window.location.search).get('brief') ?? '')
+  const [adminRows, setAdminRows] = useState<ApiAdmin[]>([])
+  const [invite, setInvite] = useState({ name: '', email: '', telegramUserId: '', telegramNotificationsAllowed: true, telegramNotifications: true })
+  const [newAdminCode, setNewAdminCode] = useState('')
   const isAuthed = Boolean(adminToken)
 
   const filteredCandidates = useMemo(() => {
@@ -275,6 +356,7 @@ function App() {
   const activeCandidate =
     filteredCandidates.find((candidate) => candidate.id === selectedCandidate) ??
     filteredCandidates[0]
+  const activeBrief = briefRows.find((brief) => brief.id === selectedBrief) ?? briefRows[0]
   const activeCandidateHasMedia = Boolean(
     activeCandidate &&
       (activeCandidate.portraitPhotoPath ||
@@ -320,23 +402,32 @@ function App() {
     setAuthError('')
 
     try {
-      const [apiCandidates, events] = await Promise.all([
+      const [apiCandidates, events, admin, briefs, admins] = await Promise.all([
         listApiCandidates(token),
         listAuditEvents(token),
+        getAdminSession(token),
+        listApiBriefs(token),
+        listApiAdmins(token),
       ])
       const mappedCandidates = apiCandidates.map(mapApiCandidate)
       setCandidateRows(mappedCandidates)
       setAuditEvents(events.slice(-8).reverse())
+      setSessionAdmin(admin)
+      setBriefRows(briefs)
+      setAdminRows(admins)
 
       if (!mappedCandidates.some((candidate) => candidate.id === selectedCandidate)) {
         setSelectedCandidate(mappedCandidates[0]?.id ?? '')
+      }
+      if (!briefs.some((brief) => brief.id === selectedBrief)) {
+        setSelectedBrief(briefs[0]?.id ?? '')
       }
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Ошибка доступа')
       setAdminToken('')
       localStorage.removeItem('face-admin-token')
     }
-  }, [adminToken, selectedCandidate])
+  }, [adminToken, selectedBrief, selectedCandidate])
 
   useEffect(() => {
     const refresh = window.setTimeout(() => {
@@ -369,6 +460,9 @@ function App() {
     setTokenInput('')
     setCandidateRows(candidates)
     setAuditEvents([])
+    setSessionAdmin(null)
+    setBriefRows([])
+    setAdminRows([])
     localStorage.removeItem('face-admin-token')
   }
 
@@ -404,6 +498,42 @@ function App() {
     }
 
     window.location.href = getCandidateExportUrl(adminToken)
+  }
+
+  const saveBrief = async (changes: Partial<ApiBrief>) => {
+    if (!adminToken || !activeBrief) return
+    try {
+      const brief = await updateApiBrief(activeBrief.id, changes, adminToken)
+      setBriefRows((rows) => rows.map((item) => item.id === brief.id ? brief : item))
+      setActionMessage(`${brief.id}: ${t.save}.`)
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : 'Ошибка')
+    }
+  }
+
+  const inviteAdmin = async () => {
+    if (!adminToken) return
+    setActionMessage('')
+    try {
+      const result = await inviteApiAdmin(invite, adminToken)
+      setAdminRows((rows) => [...rows, result.admin])
+      setNewAdminCode(result.accessToken)
+      setInvite({ name: '', email: '', telegramUserId: '', telegramNotificationsAllowed: true, telegramNotifications: true })
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : 'Ошибка')
+    }
+  }
+
+  const saveAdmin = async (id: string, changes: Partial<ApiAdmin>) => {
+    if (!adminToken) return
+    try {
+      const updated = await updateApiAdmin(id, changes, adminToken)
+      setAdminRows((rows) => rows.map((item) => item.id === id ? updated : item))
+      if (sessionAdmin?.id === id) setSessionAdmin(updated)
+      setActionMessage(`${updated.name}: ${t.save}.`)
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : 'Ошибка')
+    }
   }
 
   if (!isAuthed) {
@@ -548,6 +678,98 @@ function App() {
                 ]}
                 title="MVP"
               />
+            </section>
+          </div>
+        )}
+
+        {activeView === 'briefs' && (
+          <div className="viewStack">
+            {(authError || actionMessage) && (
+              <section className={authError ? 'noticeBox dangerNotice' : 'noticeBox'}>
+                <AlertTriangle size={18} />
+                <span>{authError || actionMessage}</span>
+              </section>
+            )}
+            {activeBrief ? (
+              <section className="candidateLayout">
+                <div className="tablePanel">
+                  <table>
+                    <thead><tr><th>{t.client}</th><th>{t.project}</th><th>{t.shoot}</th><th>{t.status}</th></tr></thead>
+                    <tbody>
+                      {briefRows.map((brief) => (
+                        <tr className={brief.id === activeBrief.id ? 'selectedRow' : ''} key={brief.id} onClick={() => setSelectedBrief(brief.id)}>
+                          <td><button className="tableSelect" type="button"><strong>{brief.company || brief.clientName}</strong><span>{brief.id} · {new Date(brief.createdAt).toLocaleString()}</span></button></td>
+                          <td>{brief.projectTitle || brief.projectType}</td>
+                          <td>{brief.shootingDate || '—'} · {brief.location || '—'}</td>
+                          <td><span className={`statusPill ${brief.status === 'new' ? 'statusWarn' : brief.status === 'closed' ? 'statusIdle' : 'statusGood'}`}>{brief.status}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <aside className="detailPanel briefDetail">
+                  <div className="panelHeader">
+                    <div><p className="eyebrow">{activeBrief.id} · {activeBrief.locale.toUpperCase()}</p><h3>{activeBrief.projectTitle || activeBrief.projectType}</h3></div>
+                    <select className="adminSelect" value={activeBrief.status} onChange={(event) => void saveBrief({ status: event.target.value as ApiBrief['status'] })}>
+                      <option value="new">new</option><option value="contacted">contacted</option><option value="qualified">qualified</option><option value="closed">closed</option>
+                    </select>
+                  </div>
+                  <div className="profileFacts">
+                    <Fact label={t.client} value={`${activeBrief.clientName}${activeBrief.company ? ` · ${activeBrief.company}` : ''}`} />
+                    <Fact label={t.contactInfo} value={[activeBrief.phoneOrTelegram, activeBrief.email].filter(Boolean).join(' · ')} />
+                    <Fact label={t.project} value={activeBrief.projectType} />
+                    <Fact label={t.shoot} value={[activeBrief.shootingDate, activeBrief.location].filter(Boolean).join(' · ') || '—'} />
+                    <Fact label={t.budget} value={activeBrief.budget || '—'} />
+                    <Fact label={t.usageRights} value={activeBrief.usageRights || '—'} />
+                  </div>
+                  <BriefFact label={t.rolesNeeded} value={activeBrief.rolesNeeded} />
+                  <BriefFact label={t.references} value={activeBrief.referenceLinks || '—'} />
+                  <BriefFact label={t.notes} value={activeBrief.notes || '—'} />
+                  {activeBrief.attachments?.length ? (
+                    <section className="briefAttachments"><p className="eyebrow">{t.attachments}</p>{activeBrief.attachments.map((attachment, index) => (
+                      <a href={getBriefAttachmentUrl(activeBrief.id, index, adminToken)} key={`${attachment.name}-${index}`} rel="noreferrer" target="_blank">{attachment.name}<span>{Math.ceil(attachment.size / 1024)} KB ↗</span></a>
+                    ))}</section>
+                  ) : null}
+                  <label className="adminField"><span>{t.internalNotes}</span><textarea rows={4} value={activeBrief.internalNotes ?? ''} onChange={(event) => setBriefRows((rows) => rows.map((brief) => brief.id === activeBrief.id ? { ...brief, internalNotes: event.target.value } : brief))} /></label>
+                  <button className="primaryButton" onClick={() => void saveBrief({ internalNotes: activeBrief.internalNotes ?? '' })} type="button">{t.save}</button>
+                </aside>
+              </section>
+            ) : <section className="emptyState"><ClipboardList size={28} /><strong>{t.noBriefs}</strong></section>}
+          </div>
+        )}
+
+        {activeView === 'admins' && (
+          <div className="viewStack">
+            {(authError || actionMessage) && <section className={authError ? 'noticeBox dangerNotice' : 'noticeBox'}><AlertTriangle size={18} /><span>{authError || actionMessage}</span></section>}
+            {newAdminCode && <section className="accessCodeBox"><div><p className="eyebrow">{t.accessCode}</p><strong>{newAdminCode}</strong></div><button className="secondaryButton" onClick={() => void navigator.clipboard.writeText(newAdminCode)} type="button"><Copy size={16} />{t.copy}</button></section>}
+            {sessionAdmin?.role === 'super_admin' ? (
+              <section className="panel adminInvitePanel">
+                <div className="panelHeader"><div><p className="eyebrow">{t.superAdmin}</p><h3>{t.inviteAdmin}</h3></div><UserCog size={20} /></div>
+                <div className="adminFormGrid">
+                  <label className="adminField"><span>{t.adminName}</span><input value={invite.name} onChange={(event) => setInvite((value) => ({ ...value, name: event.target.value }))} /></label>
+                  <label className="adminField"><span>{t.adminEmail}</span><input type="email" value={invite.email} onChange={(event) => setInvite((value) => ({ ...value, email: event.target.value }))} /></label>
+                  <label className="adminField"><span>{t.telegramId}</span><input value={invite.telegramUserId} onChange={(event) => setInvite((value) => ({ ...value, telegramUserId: event.target.value }))} /></label>
+                  <label className="adminCheck"><input checked={invite.telegramNotificationsAllowed} onChange={(event) => setInvite((value) => ({ ...value, telegramNotificationsAllowed: event.target.checked, telegramNotifications: event.target.checked && value.telegramNotifications }))} type="checkbox" /><span>{t.allowNotifications}</span></label>
+                  <label className="adminCheck"><input checked={invite.telegramNotifications} disabled={!invite.telegramNotificationsAllowed} onChange={(event) => setInvite((value) => ({ ...value, telegramNotifications: event.target.checked }))} type="checkbox" /><span>{t.receiveNotifications}</span></label>
+                </div>
+                <button className="primaryButton" disabled={!invite.name.trim()} onClick={() => void inviteAdmin()} type="button"><Plus size={17} />{t.inviteAdmin}</button>
+              </section>
+            ) : <section className="noticeBox"><ShieldCheck size={18} /><span>{t.adminOnly}</span></section>}
+
+            <section className="adminCards">
+              {adminRows.map((admin) => {
+                const editable = sessionAdmin?.role === 'super_admin' || sessionAdmin?.id === admin.id
+                return <article className="panel adminCard" key={admin.id}>
+                  <div className="panelHeader"><div><p className="eyebrow">{admin.id}</p><h3>{admin.name}</h3><span className="adminRole">{admin.role === 'super_admin' ? t.superAdmin : t.regularAdmin}</span></div><span className={`statusPill ${admin.status === 'active' ? 'statusGood' : 'statusBad'}`}>{admin.status === 'active' ? t.active : t.disabled}</span></div>
+                  <div className="adminFormGrid">
+                    <label className="adminField"><span>{t.telegramId}</span><input disabled={!editable} value={admin.telegramUserId ?? ''} onChange={(event) => setAdminRows((rows) => rows.map((item) => item.id === admin.id ? { ...item, telegramUserId: event.target.value } : item))} /></label>
+                    <label className="adminField"><span>{t.telegramUsername}</span><input disabled={!editable} value={admin.telegramUsername ?? ''} onChange={(event) => setAdminRows((rows) => rows.map((item) => item.id === admin.id ? { ...item, telegramUsername: event.target.value } : item))} /></label>
+                    <label className="adminCheck"><input checked={admin.telegramNotificationsAllowed} disabled={sessionAdmin?.role !== 'super_admin' || admin.role === 'super_admin'} onChange={(event) => setAdminRows((rows) => rows.map((item) => item.id === admin.id ? { ...item, telegramNotificationsAllowed: event.target.checked, telegramNotifications: event.target.checked && item.telegramNotifications } : item))} type="checkbox" /><span>{t.allowNotifications}</span></label>
+                    <label className="adminCheck"><input checked={admin.telegramNotifications} disabled={!editable || !admin.telegramNotificationsAllowed} onChange={(event) => setAdminRows((rows) => rows.map((item) => item.id === admin.id ? { ...item, telegramNotifications: event.target.checked } : item))} type="checkbox" /><span>{t.receiveNotifications}</span></label>
+                  </div>
+                  {editable && <button className="primaryButton" onClick={() => void saveAdmin(admin.id, { telegramUserId: admin.telegramUserId, telegramUsername: admin.telegramUsername, telegramNotifications: admin.telegramNotifications, telegramNotificationsAllowed: admin.telegramNotificationsAllowed })} type="button">{t.save}</button>}
+                </article>
+              })}
             </section>
           </div>
         )}
@@ -886,6 +1108,10 @@ function Fact({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   )
+}
+
+function BriefFact({ label, value }: { label: string; value: string }) {
+  return <section className="briefFact"><span>{label}</span><p>{value}</p></section>
 }
 
 function InfoPanel({ icon, items, title }: { icon: ReactNode; items: string[][]; title: string }) {
