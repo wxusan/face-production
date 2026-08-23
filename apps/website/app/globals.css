@@ -1099,12 +1099,14 @@ button {
 
   .site-frame[data-locale="ru"] .hero-title,
   .site-frame[data-locale="uz"] .hero-title {
-    margin-left: 6vw;
+    margin-right: auto;
+    margin-left: auto;
+    font-size: clamp(56px, 15.5vw, 74px);
   }
 
   .site-frame[data-locale="ru"] .hero-title span:nth-child(2),
   .site-frame[data-locale="uz"] .hero-title span:nth-child(2) {
-    transform: translateX(4vw);
+    transform: translateX(2vw);
   }
 
   .hero-subtitle {
@@ -1117,6 +1119,7 @@ button {
 
   .site-frame[data-locale="ru"] .hero-subtitle,
   .site-frame[data-locale="uz"] .hero-subtitle {
+    margin-top: 10px;
     margin-left: 8vw;
   }
 
