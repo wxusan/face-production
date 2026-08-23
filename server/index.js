@@ -55,7 +55,7 @@ function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, {
     'access-control-allow-headers': 'content-type,x-admin-token',
     'access-control-allow-methods': 'GET,POST,OPTIONS',
-    'access-control-allow-origin': 'http://127.0.0.1:5173',
+    'access-control-allow-origin': 'http://127.0.0.1:8787',
     'content-type': 'application/json',
   })
   response.end(JSON.stringify(body, null, 2))
@@ -72,7 +72,7 @@ function sendCsv(response, filename, content) {
   response.writeHead(200, {
     'access-control-allow-headers': 'content-type,x-admin-token',
     'access-control-allow-methods': 'GET,POST,OPTIONS',
-    'access-control-allow-origin': 'http://127.0.0.1:5173',
+    'access-control-allow-origin': 'http://127.0.0.1:8787',
     'content-disposition': `attachment; filename="${filename}"`,
     'content-type': 'text/csv; charset=utf-8',
   })

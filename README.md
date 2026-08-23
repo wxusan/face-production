@@ -11,11 +11,7 @@ npm install
 npm run dev
 ```
 
-Run the secure backend in a second terminal:
-
-```bash
-npm run server
-```
+This starts the complete dashboard at `http://127.0.0.1:8787`. The dashboard UI and API are served together by the Node application; there is no separate frontend development server.
 
 Run Telegram local polling when you want the bot to answer Telegram messages during development:
 
