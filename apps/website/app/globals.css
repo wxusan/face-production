@@ -1087,40 +1087,23 @@ button {
   }
 
   .hero-title {
-    font-size: clamp(64px, 18vw, 86px);
-    margin-right: 0;
-    margin-left: 8vw;
+    font-size: clamp(56px, 15.5vw, 74px);
+    margin-right: auto;
+    margin-left: auto;
     text-align: left;
   }
 
   .hero-title span:nth-child(2) {
-    transform: translateX(7vw);
-  }
-
-  .site-frame[data-locale="ru"] .hero-title,
-  .site-frame[data-locale="uz"] .hero-title {
-    margin-right: auto;
-    margin-left: auto;
-    font-size: clamp(56px, 15.5vw, 74px);
-  }
-
-  .site-frame[data-locale="ru"] .hero-title span:nth-child(2),
-  .site-frame[data-locale="uz"] .hero-title span:nth-child(2) {
     transform: translateX(2vw);
   }
 
   .hero-subtitle {
     width: min(100%, 330px);
+    margin-top: 10px;
     margin-right: auto;
-    margin-left: 10vw;
+    margin-left: 8vw;
     padding-left: 0;
     font-size: 17px;
-  }
-
-  .site-frame[data-locale="ru"] .hero-subtitle,
-  .site-frame[data-locale="uz"] .hero-subtitle {
-    margin-top: 10px;
-    margin-left: 8vw;
   }
 
   .hero-actions {
