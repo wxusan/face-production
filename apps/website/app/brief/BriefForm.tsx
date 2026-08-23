@@ -7,8 +7,8 @@ import type { Locale } from "../page";
 type FormData = {
   clientName: string;
   company: string;
-  phoneOrTelegram: string;
-  email: string;
+  phone: string;
+  telegram: string;
   projectTitle: string;
   projectType: string;
   rolesNeeded: string;
@@ -21,7 +21,7 @@ type FormData = {
 };
 
 const emptyForm: FormData = {
-  clientName: "", company: "", phoneOrTelegram: "", email: "", projectTitle: "",
+  clientName: "", company: "", phone: "", telegram: "", projectTitle: "",
   projectType: "", rolesNeeded: "", shootingDate: "", location: "", budget: "",
   usageRights: "", referenceLinks: "", notes: "",
 };
@@ -33,7 +33,7 @@ const copy = {
     steps: ["О ВАС", "ПРОЕКТ", "ДЕТАЛИ"], next: "ДАЛЕЕ", previous: "НАЗАД", submit: "ОТПРАВИТЬ ЗАЯВКУ",
     sending: "ОТПРАВЛЯЕМ...", required: "Заполните обязательные поля.", error: "Не удалось отправить заявку. Попробуйте ещё раз или напишите нам в Telegram.",
     labels: {
-      clientName: "Ваше имя *", company: "Компания", phoneOrTelegram: "Телефон или Telegram *", email: "Email",
+      clientName: "Ваше имя *", company: "Компания", phone: "Номер телефона *", telegram: "Telegram (необязательно)",
       projectTitle: "Название проекта", projectType: "Тип проекта *", rolesNeeded: "Какие актёры / роли нужны? *",
       shootingDate: "Дата съёмки", location: "Место съёмки", budget: "Бюджет / диапазон",
       usageRights: "Где и как будет использоваться материал?", referenceLinks: "Ссылки на референсы",
@@ -50,7 +50,7 @@ const copy = {
     steps: ["ABOUT YOU", "PROJECT", "DETAILS"], next: "CONTINUE", previous: "BACK", submit: "SEND A BRIEF",
     sending: "SENDING...", required: "Please complete the required fields.", error: "We could not send the request. Please try again or message us on Telegram.",
     labels: {
-      clientName: "Your name *", company: "Company", phoneOrTelegram: "Phone or Telegram *", email: "Email",
+      clientName: "Your name *", company: "Company", phone: "Phone number *", telegram: "Telegram (optional)",
       projectTitle: "Project name", projectType: "Production type *", rolesNeeded: "Roles / talent needed *",
       shootingDate: "Shooting date", location: "Shooting location", budget: "Budget / range",
       usageRights: "Usage rights", referenceLinks: "Reference links", files: "References or documents", notes: "Additional notes",
@@ -66,7 +66,7 @@ const copy = {
     steps: ["SIZ HAQINGIZDA", "LOYIHA", "TAFSILOTLAR"], next: "DAVOM ETISH", previous: "ORQAGA", submit: "SO‘ROVNI YUBORISH",
     sending: "YUBORILMOQDA...", required: "Majburiy joylarni to‘ldiring.", error: "So‘rov yuborilmadi. Qayta urinib ko‘ring yoki Telegram orqali yozing.",
     labels: {
-      clientName: "Ismingiz *", company: "Kompaniya nomi", phoneOrTelegram: "Telefon yoki Telegram *", email: "Email",
+      clientName: "Ismingiz *", company: "Kompaniya nomi", phone: "Telefon raqamingiz *", telegram: "Telegram (ixtiyoriy)",
       projectTitle: "Loyiha nomi", projectType: "Loyiha turi *", rolesNeeded: "Qanday aktyorlar yoki rollar kerak? *",
       shootingDate: "Suratga olish sanasi", location: "Suratga olish joyi", budget: "Byudjet yoki byudjet oralig‘i",
       usageRights: "Material qayerda va qancha muddat ishlatiladi?", referenceLinks: "Namuna havolalari",
@@ -80,7 +80,7 @@ const copy = {
 } satisfies Record<Locale, unknown>;
 
 const requiredByStep: Array<Array<keyof FormData>> = [
-  ["clientName", "phoneOrTelegram"],
+  ["clientName", "phone"],
   ["projectType", "rolesNeeded"],
   [],
 ];
@@ -143,6 +143,10 @@ export function BriefForm({ locale }: { locale: Locale }) {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (step < 2) {
+      next();
+      return;
+    }
     if (!requiredByStep.flat().every((field) => form[field].trim())) {
       setError(t.required);
       return;
@@ -196,7 +200,7 @@ export function BriefForm({ locale }: { locale: Locale }) {
           <div className="brief-dossier-note" aria-hidden="true">PROJECT<br />CASTING<br />{new Date().getFullYear()}</div>
         </section>
 
-        <form className="brief-form" onSubmit={submit}>
+        <form className="brief-form" noValidate onSubmit={submit}>
           <ol className="brief-progress" aria-label="Progress">
             {t.steps.map((label, index) => (
               <li className={index === step ? "is-active" : index < step ? "is-complete" : ""} key={label}>
@@ -209,19 +213,19 @@ export function BriefForm({ locale }: { locale: Locale }) {
 
           <div className="brief-fields">
             {step === 0 && <>
-              <Field label={t.labels.clientName}><input autoComplete="name" value={form.clientName} onChange={(e) => update("clientName", e.target.value)} /></Field>
+              <Field label={t.labels.clientName}><input autoComplete="name" required value={form.clientName} onChange={(e) => update("clientName", e.target.value)} /></Field>
               <Field label={t.labels.company}><input autoComplete="organization" value={form.company} onChange={(e) => update("company", e.target.value)} /></Field>
-              <Field label={t.labels.phoneOrTelegram}><input autoComplete="tel" value={form.phoneOrTelegram} onChange={(e) => update("phoneOrTelegram", e.target.value)} /></Field>
-              <Field label={t.labels.email}><input autoComplete="email" type="email" value={form.email} onChange={(e) => update("email", e.target.value)} /></Field>
+              <Field label={t.labels.phone}><input autoComplete="tel" inputMode="tel" placeholder="+998" required type="tel" value={form.phone} onChange={(e) => update("phone", e.target.value)} /></Field>
+              <Field label={t.labels.telegram}><input autoComplete="off" placeholder="@username" value={form.telegram} onChange={(e) => update("telegram", e.target.value)} /></Field>
             </>}
             {step === 1 && <>
               <Field label={t.labels.projectTitle}><input value={form.projectTitle} onChange={(e) => update("projectTitle", e.target.value)} /></Field>
               <Field label={t.labels.projectType}>
-                <select value={form.projectType} onChange={(e) => update("projectType", e.target.value)}>
+                <select required value={form.projectType} onChange={(e) => update("projectType", e.target.value)}>
                   <option value="">—</option>{t.types.map((type) => <option key={type}>{type}</option>)}
                 </select>
               </Field>
-              <Field className="brief-field-wide" hint={t.hints.roles} label={t.labels.rolesNeeded}><textarea rows={3} value={form.rolesNeeded} onChange={(e) => update("rolesNeeded", e.target.value)} /></Field>
+              <Field className="brief-field-wide" hint={t.hints.roles} label={t.labels.rolesNeeded}><textarea required rows={3} value={form.rolesNeeded} onChange={(e) => update("rolesNeeded", e.target.value)} /></Field>
               <Field label={t.labels.shootingDate}><input type="date" value={form.shootingDate} onChange={(e) => update("shootingDate", e.target.value)} /></Field>
               <Field label={t.labels.location}><input value={form.location} onChange={(e) => update("location", e.target.value)} /></Field>
             </>}

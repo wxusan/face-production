@@ -1398,7 +1398,7 @@ export async function routeRequest(request, response) {
 
   if (request.method === 'POST' && url.pathname === '/api/public/briefs') {
     const body = await readJson(request)
-    const required = ['clientName', 'phoneOrTelegram', 'projectType', 'rolesNeeded']
+    const required = ['clientName', 'phone', 'projectType', 'rolesNeeded']
     const missing = required.filter((field) => !String(body[field] ?? '').trim())
     if (missing.length) {
       sendJson(response, 400, { error: `Missing required fields: ${missing.join(', ')}` })
@@ -1410,8 +1410,8 @@ export async function routeRequest(request, response) {
       locale: body.locale,
       clientName: String(body.clientName).trim(),
       company: String(body.company ?? '').trim(),
-      phoneOrTelegram: String(body.phoneOrTelegram).trim(),
-      email: String(body.email ?? '').trim(),
+      phone: String(body.phone).trim(),
+      telegram: String(body.telegram ?? '').replace(/^@/, '').trim(),
       projectTitle: String(body.projectTitle ?? '').trim(),
       projectType: String(body.projectType).trim(),
       rolesNeeded: String(body.rolesNeeded).trim(),

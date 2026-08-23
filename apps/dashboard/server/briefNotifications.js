@@ -11,8 +11,9 @@ function briefMessage(brief) {
     `Project: ${brief.projectType}`,
     `Roles: ${brief.rolesNeeded}`,
     `Shoot: ${brief.shootingDate || 'Not specified'} · ${brief.location || 'Not specified'}`,
-    `Contact: ${brief.phoneOrTelegram}`,
-  ].join('\n')
+    `Phone: ${brief.phone || brief.phoneOrTelegram}`,
+    brief.telegram ? `Telegram: @${brief.telegram}` : null,
+  ].filter(Boolean).join('\n')
 }
 
 export async function notifyAdminsAboutBrief(brief) {

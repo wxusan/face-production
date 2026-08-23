@@ -69,9 +69,18 @@ test("server-renders every localized brief form", async () => {
 
   assert.match(russian, /РАССКАЖИТЕ/);
   assert.match(russian, /О ВАС/);
+  assert.match(russian, /Номер телефона \*/);
+  assert.match(russian, /Telegram \(необязательно\)/);
+  assert.doesNotMatch(russian, />Email</);
   assert.match(english, /TELL US ABOUT/);
   assert.match(english, /ABOUT YOU/);
+  assert.match(english, /Phone number \*/);
+  assert.match(english, /Telegram \(optional\)/);
+  assert.doesNotMatch(english, />Email</);
   assert.match(uzbek, /LOYIHANGIZ/);
   assert.match(uzbek, /KASTING SO‘ROVI/);
   assert.match(uzbek, /SIZ HAQINGIZDA/);
+  assert.match(uzbek, /Telefon raqamingiz \*/);
+  assert.match(uzbek, /Telegram \(ixtiyoriy\)/);
+  assert.doesNotMatch(uzbek, />Email</);
 });
