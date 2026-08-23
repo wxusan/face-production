@@ -13,6 +13,16 @@ type SiteCopy = {
   applyAsTalent: string;
   steps: [string, string, string];
   welcome: [string, string];
+  contact: {
+    eyebrow: string;
+    title: [string, string];
+    note: string;
+    channels: [
+      { code: string; name: string; purpose: string; action: string },
+      { code: string; name: string; purpose: string; action: string },
+      { code: string; name: string; purpose: string; action: string },
+    ];
+  };
 };
 
 const localeOptions: Array<{ code: Locale; short: string; name: string }> = [
@@ -30,6 +40,16 @@ const siteCopy: Record<Locale, SiteCopy> = {
     applyAsTalent: "СТАТЬ АРТИСТОМ",
     steps: ["БРИФ", "ШОРТ-ЛИСТ", "БУКИНГ"],
     welcome: ["МЫ ИЩЕМ", "НОВЫЕ ТАЛАНТЫ."],
+    contact: {
+      eyebrow: "КОНТАКТЫ / СВЯЗЬ",
+      title: ["ОДИН ВОПРОС —", "ОДИН КАНАЛ."],
+      note: "ЛОКАЛЬНЫЙ ПРЕДПРОСМОТР · ССЫЛКИ ПОКА НЕ АКТИВНЫ",
+      channels: [
+        { code: "01 / BOT", name: "TELEGRAM-БОТ", purpose: "Анкета артиста", action: "НАЧАТЬ" },
+        { code: "02 / SOCIAL", name: "INSTAGRAM", purpose: "Работы и бэкстейдж", action: "СМОТРЕТЬ" },
+        { code: "03 / DIRECT", name: "TELEGRAM", purpose: "Бриф и связь с менеджером", action: "НАПИСАТЬ" },
+      ],
+    },
   },
   en: {
     nav: { work: "Work", talent: "Talent", contact: "Contact", menu: "Menu", close: "Close" },
@@ -39,6 +59,16 @@ const siteCopy: Record<Locale, SiteCopy> = {
     applyAsTalent: "APPLY AS TALENT",
     steps: ["BRIEF", "SHORTLIST", "BOOK"],
     welcome: ["WE WELCOME", "NEW TALENT."],
+    contact: {
+      eyebrow: "CONTACT / CHANNELS",
+      title: ["ONE QUESTION —", "ONE CHANNEL."],
+      note: "LOCAL PREVIEW · LINKS ARE NOT ACTIVE YET",
+      channels: [
+        { code: "01 / BOT", name: "TELEGRAM BOT", purpose: "Talent application", action: "START" },
+        { code: "02 / SOCIAL", name: "INSTAGRAM", purpose: "Work and backstage", action: "VIEW" },
+        { code: "03 / DIRECT", name: "TELEGRAM", purpose: "Briefs and a real manager", action: "MESSAGE" },
+      ],
+    },
   },
   uz: {
     nav: { work: "Ishlar", talent: "Aktyorlar", contact: "Aloqa", menu: "Menyu", close: "Yopish" },
@@ -48,6 +78,16 @@ const siteCopy: Record<Locale, SiteCopy> = {
     applyAsTalent: "AKTYOR BO‘LISH",
     steps: ["BRIF", "SARALASH", "TASDIQ"],
     welcome: ["YANGI ISTE’DODLARNI", "QABUL QILAMIZ."],
+    contact: {
+      eyebrow: "ALOQA / KANALLAR",
+      title: ["BITTA SAVOL —", "BITTA KANAL."],
+      note: "LOKAL KO‘RINISH · HAVOLALAR HOZIRCHA FAOL EMAS",
+      channels: [
+        { code: "01 / BOT", name: "TELEGRAM-BOT", purpose: "Aktyor anketasi", action: "BOSHLASH" },
+        { code: "02 / SOCIAL", name: "INSTAGRAM", purpose: "Ishlar va beksteyj", action: "KO‘RISH" },
+        { code: "03 / DIRECT", name: "TELEGRAM", purpose: "Brif va menejer bilan aloqa", action: "YOZISH" },
+      ],
+    },
   },
 };
 
@@ -214,9 +254,9 @@ function Hero({ copy }: { copy: SiteCopy }) {
           {copy.subtitle[0]}<br />{copy.subtitle[1]}
         </p>
         <div className="hero-actions">
-          <ActionLink variant="solid" href="#contact">{copy.sendBrief}</ActionLink>
+          <ActionLink variant="solid" href="#manager-contact">{copy.sendBrief}</ActionLink>
           <div className="mobile-talent-action">
-            <ActionLink variant="outline" href="#talent">{copy.applyAsTalent}</ActionLink>
+            <ActionLink variant="outline" href="#bot-contact">{copy.applyAsTalent}</ActionLink>
           </div>
         </div>
       </div>
@@ -250,7 +290,7 @@ function TalentInvitation({ copy }: { copy: SiteCopy }) {
       </div>
       <div className="talent-copy">
         <h2>{copy.welcome[0]}<br />{copy.welcome[1]}</h2>
-        <ActionLink variant="outline" href="#contact">{copy.applyAsTalent}</ActionLink>
+        <ActionLink variant="outline" href="#bot-contact">{copy.applyAsTalent}</ActionLink>
       </div>
     </aside>
   );
@@ -263,6 +303,38 @@ function ProcessSection({ copy }: { copy: SiteCopy }) {
         <ProcessStep key={label} number={`0${index + 1}`} label={label} icon={stepIcons[index]} />
       ))}
       <TalentInvitation copy={copy} />
+    </section>
+  );
+}
+
+function ContactSection({ copy }: { copy: SiteCopy }) {
+  return (
+    <section className="contact-section" id="contact" aria-labelledby="contact-title">
+      <div className="contact-heading">
+        <span className="contact-eyebrow">{copy.contact.eyebrow}</span>
+        <h2 id="contact-title">
+          {copy.contact.title[0]}<br />{copy.contact.title[1]}
+        </h2>
+        <p>{copy.contact.note}</p>
+      </div>
+      <div className="contact-channels">
+        {copy.contact.channels.map((channel, index) => (
+          <article
+            className="contact-card"
+            id={index === 0 ? "bot-contact" : index === 2 ? "manager-contact" : undefined}
+            key={channel.code}
+          >
+            <span className="contact-code">{channel.code}</span>
+            <span className="contact-monogram" aria-hidden="true">{index === 1 ? "IG" : "TG"}</span>
+            <h3>{channel.name}</h3>
+            <p>{channel.purpose}</p>
+            <span className="contact-action">
+              {channel.action}
+              <Arrow />
+            </span>
+          </article>
+        ))}
+      </div>
     </section>
   );
 }
@@ -294,7 +366,7 @@ export function FaceProductionPage({ initialLocale = "ru" }: { initialLocale?: L
       <Header copy={copy} locale={locale} onLanguageSelect={selectLanguage} />
       <Hero copy={copy} />
       <ProcessSection copy={copy} />
-      <span id="contact" className="contact-anchor" aria-hidden="true" />
+      <ContactSection copy={copy} />
     </div>
   );
 }
