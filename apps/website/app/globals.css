@@ -440,21 +440,27 @@ button {
 .casting-board {
   position: relative;
   z-index: 3;
+  display: flex;
   width: 100%;
   height: 100%;
   margin: 0;
+  align-items: center;
+  justify-content: center;
   overflow: visible;
 }
 
-.casting-board picture,
-.casting-board img {
+.casting-board picture {
   display: block;
-  width: 100%;
-  height: 100%;
+  width: min(calc(100% - 36px), 916px);
+  height: auto;
 }
 
 .casting-board img {
-  object-fit: cover;
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 580px;
+  object-fit: contain;
   object-position: center center;
 }
 

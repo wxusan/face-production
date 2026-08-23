@@ -219,9 +219,9 @@ function CastingBoard() {
   return (
     <figure className="casting-board" aria-label="Casting contact sheet with shortlisted performers, scene-test photographs, production notes, and red pencil annotations">
       <picture>
-        <source media="(max-width: 1050px)" srcSet="/assets/casting-board-mobile-cutout.png" />
+        <source media="(max-width: 1050px)" srcSet="/assets/casting-board-mobile.png" />
         <Image
-          src="/assets/casting-board-desktop-cutout.png"
+          src="/assets/casting-board-desktop.png"
           alt=""
           width={948}
           height={600}
