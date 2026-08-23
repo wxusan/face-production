@@ -41,7 +41,7 @@ set the webhook with `npm run webhook:set -- https://<PUBLIC_DOMAIN>`.
 Open the admin UI:
 
 ```text
-http://127.0.0.1:5173/
+http://127.0.0.1:8787/
 ```
 
 Development admin passcode (set a unique value in `.env.local`):

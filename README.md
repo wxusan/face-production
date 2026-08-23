@@ -11,7 +11,9 @@ npm install
 npm run dev
 ```
 
-Run the backend:
+This starts the complete dashboard at `http://127.0.0.1:8787`. The dashboard UI and API are served together by the Node application; there is no separate frontend development server.
+
+The same server can also be started explicitly:
 
 ```bash
 npm run server
