@@ -326,7 +326,7 @@ button {
 
 .hero {
   position: relative;
-  z-index: 1;
+  z-index: 3;
   display: grid;
   grid-template-columns: minmax(520px, 39.5%) minmax(0, 60.5%);
   height: 590px;
