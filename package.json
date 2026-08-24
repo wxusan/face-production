@@ -10,10 +10,8 @@
   "scripts": {
     "dev": "turbo run dev --parallel",
     "dev:website": "turbo run dev --filter=@face-production/website",
-    "dev:dashboard": "turbo run dev --filter=@face-production/dashboard",
     "build": "turbo run build",
     "build:website": "turbo run build --filter=@face-production/website",
-    "build:dashboard": "turbo run build --filter=@face-production/dashboard",
     "lint": "turbo run lint",
     "test": "turbo run test"
   },
