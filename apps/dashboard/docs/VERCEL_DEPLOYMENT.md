@@ -68,7 +68,7 @@ npm run check:supabase
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-2. Push this project to GitHub, including the `dist/` folder.
+2. Push this project to GitHub. The admin portal is rendered by the Node API and its static icons are kept in `public/`.
 3. Import the repo into Vercel.
 4. Add the environment variables above.
 5. Deploy.
@@ -115,7 +115,7 @@ npm run bot
 
 ## Known Vercel Risks
 
-- The current MVP deploys the generated `dist/` admin portal because the local Vite build tool has been unreliable. After frontend source changes, rebuild or refresh `dist/` locally and push it too.
+- The admin portal is rendered directly by the Node API, so production checks must cover both the HTML response and the files in `public/`.
 - Serverless cold starts can make some replies slower.
 - Large videos may hit function time or response limits.
 - Old local media paths will not exist on Vercel. New media uploaded after Supabase Storage setup will work.

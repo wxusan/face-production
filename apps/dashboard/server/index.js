@@ -134,10 +134,10 @@ function staticContentType(pathname) {
 }
 
 async function sendStaticFile(response, pathname) {
-  const filePath = resolve(process.cwd(), 'dist', pathname.replace(/^\/+/, ''))
-  const distRoot = resolve(process.cwd(), 'dist')
+  const filePath = resolve(process.cwd(), 'public', pathname.replace(/^\/+/, ''))
+  const publicRoot = resolve(process.cwd(), 'public')
 
-  if (!filePath.startsWith(distRoot)) {
+  if (!filePath.startsWith(publicRoot)) {
     sendNotFound(response)
     return
   }

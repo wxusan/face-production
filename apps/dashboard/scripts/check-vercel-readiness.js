@@ -1,5 +1,3 @@
-import { readdir } from 'node:fs/promises'
-import { join } from 'node:path'
 import handler from '../vercel/handler.js'
 
 async function call(url, headers = {}) {
@@ -35,19 +33,11 @@ function assertOk(check, message) {
   }
 }
 
-const distAssets = await readdir(join(process.cwd(), 'dist', 'assets'))
-const cssAsset = distAssets.find((file) => file.endsWith('.css'))
-const jsAsset = distAssets.find((file) => file.endsWith('.js'))
-
-assertOk(cssAsset, 'Missing generated CSS asset in dist/assets')
-assertOk(jsAsset, 'Missing generated JS asset in dist/assets')
-
 const checks = [
   await call('/api'),
   await call('/api/health'),
-  await call(`/api/assets/${cssAsset}`),
-  await call(`/api/assets/${jsAsset}`),
   await call('/api/favicon.svg'),
+  await call('/api/icons.svg'),
 ]
 
 for (const check of checks) {
@@ -56,6 +46,9 @@ for (const check of checks) {
 }
 
 const health = JSON.parse(checks[1].body)
+assertOk(checks[0].body.includes('FACE Production'), 'Admin portal HTML is missing its product title')
+assertOk(checks[2].contentType === 'image/svg+xml', 'Favicon did not return SVG content')
+assertOk(checks[3].contentType === 'image/svg+xml', 'Icon sprite did not return SVG content')
 
 console.log(JSON.stringify({
   checks: checks.map((check) => ({
